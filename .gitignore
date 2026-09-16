@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+build/
+dist/
+*.egg-info/
+
+# IDE & OS
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
+
+# Database and SQLite files
+*.db
+*.db-journal
+*.db-shm
+*.db-wal
+data/*.db
+data/*.db-shm
+data/*.db-wal
+
+# Uploads and temporary assets
+data/uploads/*
+!data/uploads/.gitkeep
+
+# Sensitive config
+data/config/*.json
