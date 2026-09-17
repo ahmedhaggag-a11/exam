@@ -33,3 +33,14 @@ data/uploads/*
 
 # Sensitive config
 data/config/*.json
+
+# Next.js
+node_modules/
+.next/
+out/
+
+# Environment variables (NEVER commit these)
+.env.local
+.env.*.local
+.env
+.vercel

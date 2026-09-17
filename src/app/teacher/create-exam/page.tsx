@@ -65,17 +65,21 @@ export default function CreateExamPage() {
   }, [subjectId]);
 
   async function loadSubjects() {
-    const { data } = await supabase.from('subjects').select('id, name').order('name');
-    setSubjects(data || []);
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+    const { data } = await supabase.from('profiles').select('subjects').eq('id', user.id).single();
+    if (data && data.subjects) {
+      setSubjects(data.subjects.map((name: string) => ({ id: name, name })));
+    }
   }
 
   async function loadSources(sid: string) {
-    const { data } = await supabase.from('sources').select('id, title, subject_id').eq('subject_id', sid).order('title');
+    const { data } = await supabase.from('sources').select('id, title:name, subject').eq('subject', sid).order('name');
     setSources(data || []);
   }
 
   async function loadQuestions(sid: string) {
-    const { data } = await supabase.from('questions').select('*').eq('subject_id', sid);
+    const { data } = await supabase.from('questions').select('*').eq('subject', sid);
     setQuestions(data || []);
   }
 
@@ -136,16 +140,14 @@ export default function CreateExamPage() {
 
       const { data: exam, error: examError } = await supabase.from('exams').insert({
         teacher_id: user.id,
-        subject_id: subjectId,
+        subject: subjectId, // Using the name directly since we mapped id to name
         title,
-        grade,
-        duration: parseInt(duration),
+        grade_level: grade,
+        duration_minutes: parseInt(duration),
         exam_date: examDate || null,
         instructions,
-        total_mark: totalMark,
+        total_marks: totalMark,
         models_count: modelsCount,
-        shuffle_questions: shuffleQuestions,
-        shuffle_choices: shuffleChoices,
         status: 'draft',
       }).select().single();
 
@@ -158,7 +160,6 @@ export default function CreateExamPage() {
           exam_id: exam.id,
           question_id: q.id,
           order_index: idx,
-          mark: q.mark || Math.floor(totalMark / (baseModel.questions.length || 1)),
         }));
         await supabase.from('exam_questions').insert(qRows);
       }
@@ -168,9 +169,10 @@ export default function CreateExamPage() {
         const model = generatedModels[i];
         await supabase.from('exam_models').insert({
           exam_id: exam.id,
-          model_label: ['أ', 'ب', 'ج', 'د'][i] || `${i + 1}`,
+          model_code: ['A', 'B', 'C', 'D'][i] || `M${i + 1}`,
+          model_name: ['أ', 'ب', 'ج', 'د'][i] || `نموذج ${i + 1}`,
           questions_order: model.questions.map((q: any) => q.id),
-          choices_shuffle: model.choicesShuffle || {},
+          choices_order: model.choicesShuffle || {},
         });
       }
 
@@ -189,11 +191,11 @@ export default function CreateExamPage() {
   ];
 
   return (
-    <div className="max-w-4xl mx-auto">
+    <div className="max-w-4xl mx-auto px-4 md:px-0">
       <h1 className="text-2xl font-bold text-gray-800 mb-6">إنشاء امتحان جديد</h1>
 
       {/* Stepper */}
-      <div className="flex items-center mb-8 overflow-x-auto">
+      <div className="flex items-center mb-8 overflow-x-auto pb-4 custom-scrollbar">
         {STEPS.map((s, i) => (
           <div key={i} className="flex items-center">
             <div className={`flex items-center justify-center w-8 h-8 rounded-full text-sm font-bold shrink-0 ${

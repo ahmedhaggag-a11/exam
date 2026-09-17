@@ -71,7 +71,7 @@ export default function AdminUploadPDFPage() {
 
       setStatusMsg({
         type: 'success',
-        text: `تم رفع كتاب PDF بنجاح إلى Supabase Storage وتغذية بنك أسئلة المعلم المختار!`,
+        text: result.message || `تم رفع الملف وتغذية بنك الأسئلة بنجاح!`,
       });
       setFile(null);
       setSourceName('');
