@@ -79,7 +79,7 @@ export default function CreateExamPage() {
     setQuestions(data || []);
   }
 
-  const availableTopics = [...new Set(questions.map(q => q.topic).filter(Boolean))] as string[];
+  const availableTopics = Array.from(new Set(questions.map(q => q.topic).filter((t): t is string => t !== null && t !== undefined)));
 
   function toggleTopic(topic: string) {
     setSelectedTopics(prev =>
@@ -97,26 +97,28 @@ export default function CreateExamPage() {
         : questions;
 
       const examConfig = {
-        title,
-        subjectId,
+        subject: subjects.find(s => s.id === subjectId)?.name || '',
+        selected_chapters: selectedTopics,
+        total_questions: mcqCount + essayCount + tfCount,
+        question_types: { mcq: mcqCount, essay: essayCount, true_false: tfCount },
         grade,
-        mcqCount,
-        essayCount,
-        tfCount,
-        totalMark,
         duration: parseInt(duration),
         instructions,
-        selectedTopics,
       };
 
-      const selected = await provider.selectQuestionsFromBank(pool as any, examConfig as any);
-      if (!selected || selected.length === 0) {
+      const result = await provider.generateExam(pool as any, examConfig as any);
+      if (!result || result.selected_question_ids.length === 0) {
         setError('لم يتم العثور على أسئلة كافية في بنك الأسئلة للمعايير المحددة.');
         setGenerating(false);
         return;
       }
 
-      const models = generateExamModels(selected as any, modelsCount, shuffleQuestions, shuffleChoices);
+      // Map selected IDs back to question objects
+      const selectedQs = result.selected_question_ids
+        .map(id => pool.find(q => q.id === id))
+        .filter(Boolean) as typeof questions;
+
+      const models = generateExamModels(selectedQs as any, modelsCount, shuffleQuestions, shuffleChoices);
       setGeneratedModels(models);
       setStep(4);
     } catch (e: any) {
