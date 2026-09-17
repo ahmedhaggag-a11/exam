@@ -55,34 +55,18 @@ export default function AdminTeachersPage() {
     setMessage(null);
 
     try {
-      const { data: authData, error: authError } = await supabase.auth.signUp({
+      const { createTeacherAccount } = await import('./actions');
+      const result = await createTeacherAccount({
         email,
         password,
-        options: {
-          data: {
-            full_name: fullName,
-            role: 'teacher',
-          },
-        },
-      });
-
-      if (authError) throw authError;
-
-      const userId = authData.user?.id;
-      if (!userId) throw new Error('فشل الحصول على معرف الحساب التلقائي');
-
-      const { error: profileError } = await supabase.from('profiles').upsert({
-        id: userId,
-        email,
-        full_name: fullName,
-        role: 'teacher',
+        fullName,
         subjects: selectedSubjects,
         grades: selectedGrades,
       });
 
-      if (profileError) throw profileError;
+      if (!result.success) throw new Error(result.error);
 
-      setMessage({ type: 'success', text: `تم إنشاء حساب المعلم (${fullName}) بنجاح!` });
+      setMessage({ type: 'success', text: `تم إنشاء حساب المعلم (${fullName}) بنجاح! يمكنه تسجيل الدخول فوراً.` });
       setFullName('');
       setEmail('');
       setPassword('');
