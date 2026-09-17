@@ -1,0 +1,7 @@
+# Ignore python backend
+app/
+data/
+venv/
+env/
+.venv/
+__pycache__/
