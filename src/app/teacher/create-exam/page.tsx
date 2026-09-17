@@ -7,7 +7,7 @@ import { GeminiAIExamProvider } from '@/lib/ai/gemini';
 import { generateExamModels } from '@/lib/utils/exam-shuffler';
 
 interface Subject { id: string; name: string; }
-interface Source { id: string; title: string; subject_id: string; }
+interface Source { id: string; title: string; subject: string; }
 interface Question {
   id: string;
   question_text: string;
@@ -15,7 +15,7 @@ interface Question {
   options: string[] | null;
   correct_answer: string | null;
   topic: string | null;
-  subject_id: string;
+  subject: string;
 }
 
 const STEPS = ['بيانات الامتحان', 'الفصول والأسئلة', 'نماذج وخيارات', 'توليد الامتحان', 'مراجعة وحفظ'];
