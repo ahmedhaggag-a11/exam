@@ -58,84 +58,16 @@ export default function AdminUploadPDFPage() {
     setStatusMsg(null);
 
     try {
-      const fileExt = file.name.split('.').pop();
-      const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
-      const storagePath = `${selectedTeacherId}/${fileName}`;
+      const { uploadPdfAndSeedBank } = await import('./actions');
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('teacherId', selectedTeacherId);
+      formData.append('subject', selectedSubject);
+      formData.append('chapterName', chapterName);
+      formData.append('sourceName', sourceName || file.name);
 
-      const { error: uploadError } = await supabase.storage
-        .from('pdfs')
-        .upload(storagePath, file, {
-          cacheControl: '3600',
-          upsert: false,
-        });
-
-      if (uploadError) throw uploadError;
-
-      const { data: urlData } = supabase.storage.from('pdfs').getPublicUrl(storagePath);
-      const publicUrl = urlData.publicUrl;
-
-      const { data: sourceData, error: sourceError } = await supabase
-        .from('sources')
-        .insert({
-          teacher_id: selectedTeacherId,
-          name: sourceName || file.name,
-          original_filename: file.name,
-          storage_path: storagePath,
-          file_url: publicUrl,
-          subject: selectedSubject,
-          grade_level: 'الصف الثالث الثانوي',
-          file_size: file.size,
-          status: 'completed',
-        })
-        .select()
-        .single();
-
-      if (sourceError) throw sourceError;
-
-      const sampleQuestions = [
-        {
-          teacher_id: selectedTeacherId,
-          source_id: sourceData.id,
-          text: `احسب مقدار سعة المكثف في الدائرة الكهربية في ${chapterName}:`,
-          question_type: 'mcq',
-          difficulty: 'medium',
-          subject: selectedSubject,
-          chapter: chapterName,
-          grade_level: 'الصف الثالث الثانوي',
-          source: sourceName,
-          marks: 2,
-          needs_review: false,
-        },
-        {
-          teacher_id: selectedTeacherId,
-          source_id: sourceData.id,
-          text: `استنتج العلاقة الرياضية لحساب القوة الدافعة الكهربية المستحثة في ${chapterName}.`,
-          question_type: 'essay',
-          difficulty: 'hard',
-          subject: selectedSubject,
-          chapter: chapterName,
-          grade_level: 'الصف الثالث الثانوي',
-          source: sourceName,
-          marks: 4,
-          needs_review: false,
-        },
-      ];
-
-      const { data: createdQs, error: qError } = await supabase
-        .from('questions')
-        .insert(sampleQuestions)
-        .select();
-
-      if (qError) throw qError;
-
-      if (createdQs && createdQs[0]) {
-        await supabase.from('question_choices').insert([
-          { question_id: createdQs[0].id, choice_code: 'أ', text: '10 ميكروفاراد', is_correct: true, order_index: 0 },
-          { question_id: createdQs[0].id, choice_code: 'ب', text: '20 ميكروفاراد', is_correct: false, order_index: 1 },
-          { question_id: createdQs[0].id, choice_code: 'ج', text: '30 ميكروفاراد', is_correct: false, order_index: 2 },
-          { question_id: createdQs[0].id, choice_code: 'د', text: '40 ميكروفاراد', is_correct: false, order_index: 3 },
-        ]);
-      }
+      const result = await uploadPdfAndSeedBank(formData);
+      if (!result.success) throw new Error(result.error);
 
       setStatusMsg({
         type: 'success',
