@@ -32,9 +32,11 @@ async function extractQuestionsFromPDF(
     return [];
   }
 
-  try {
-    const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+  const genAI = new GoogleGenerativeAI(apiKey);
+    const model = genAI.getGenerativeModel({ 
+      model: 'gemini-1.5-flash',
+      generationConfig: { responseMimeType: 'application/json' }
+    });
 
     const pdfBase64 = bufferToBase64(pdfBuffer);
 
@@ -55,7 +57,7 @@ async function extractQuestionsFromPDF(
 5. لا تخترع أسئلة غير موجودة في الملف
 6. إذا كان السؤال غير واضح، ضع needs_review: true
 
-أعد الإجابة بصيغة JSON فقط بدون أي نص إضافي، بهذا الشكل الدقيق:
+يجب أن يكون الناتج بصيغة JSON متوافقة مع هذا المخطط الدقيق (مصفوفة من الأسئلة داخل كائن):
 {
   "questions": [
     {
@@ -93,20 +95,8 @@ async function extractQuestionsFromPDF(
     ]);
 
     const responseText = result.response.text();
-    
-    // Extract JSON from response
-    const jsonMatch = responseText.match(/\{[\s\S]*\}/);
-    if (!jsonMatch) {
-      console.error('No JSON found in Gemini response');
-      return [];
-    }
-
-    const parsed = JSON.parse(jsonMatch[0]);
-    return parsed.questions || [];
-  } catch (err) {
-    console.error('Gemini extraction error:', err);
-    return [];
-  }
+  const parsed = JSON.parse(responseText);
+  return parsed.questions || [];
 }
 
 export async function uploadPdfAndSeedBank(formData: FormData) {
