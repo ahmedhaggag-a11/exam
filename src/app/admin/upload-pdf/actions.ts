@@ -1,7 +1,7 @@
 'use server';
 
 import { createClient } from '@supabase/supabase-js';
-import { GoogleGenerativeAI } from '@google/generative-ai';
+import { GoogleGenAI } from '@google/genai';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -32,15 +32,10 @@ async function extractQuestionsFromPDF(
     return [];
   }
 
-  const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ 
-      model: 'gemini-1.5-flash',
-      generationConfig: { responseMimeType: 'application/json' }
-    });
+  const ai = new GoogleGenAI({ apiKey });
+  const pdfBase64 = bufferToBase64(pdfBuffer);
 
-    const pdfBase64 = bufferToBase64(pdfBuffer);
-
-    const prompt = `أنت خبير تربوي متخصص في استخراج الأسئلة من الكتب المدرسية والمراجع.
+  const prompt = `أنت خبير تربوي متخصص في استخراج الأسئلة من الكتب المدرسية والمراجع.
 
 المهمة: استخرج جميع الأسئلة الموجودة في هذا الملف.
 
@@ -84,19 +79,27 @@ async function extractQuestionsFromPDF(
   ]
 }`;
 
-    const result = await model.generateContent([
-      {
-        inlineData: {
-          mimeType: 'application/pdf',
-          data: pdfBase64,
+    const result = await ai.models.generateContent({
+      model: 'gemini-2.5-flash',
+      contents: [
+        {
+          inlineData: {
+            data: pdfBase64,
+            mimeType: 'application/pdf',
+          },
         },
+        prompt,
+      ],
+      config: {
+        responseMimeType: 'application/json',
       },
-      prompt,
-    ]);
+    });
 
-    const responseText = result.response.text();
-  const parsed = JSON.parse(responseText);
-  return parsed.questions || [];
+    const responseText = result.text;
+    if (!responseText) return [];
+    
+    const parsed = JSON.parse(responseText);
+    return parsed.questions || [];
 }
 
 export async function uploadPdfAndSeedBank(formData: FormData) {

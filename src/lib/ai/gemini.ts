@@ -1,4 +1,4 @@
-import { GoogleGenerativeAI } from "@google/generative-ai";
+import { GoogleGenAI } from "@google/genai";
 import { Question } from "@/types/database";
 import { ExamWizardConfig } from "@/types/exam";
 import { AIExamProvider, AIExamGeneratorResult } from "./provider";
@@ -6,10 +6,10 @@ import { AIExamProvider, AIExamGeneratorResult } from "./provider";
 export class GeminiAIExamProvider implements AIExamProvider {
   name = "Google Gemini AI Engine";
 
-  private getClient(): GoogleGenerativeAI | null {
+  private getClient(): GoogleGenAI | null {
     const apiKey = process.env.GEMINI_API_KEY;
     if (!apiKey) return null;
-    return new GoogleGenerativeAI(apiKey);
+    return new GoogleGenAI({ apiKey });
   }
 
   async generateExam(
@@ -24,8 +24,6 @@ export class GeminiAIExamProvider implements AIExamProvider {
     }
 
     try {
-      const model = client.getGenerativeModel({ model: "gemini-1.5-flash" });
-
       const questionBankSummary = availableQuestions.map((q) => ({
         id: q.id,
         chapter: q.chapter,
@@ -59,16 +57,23 @@ Return strictly a valid JSON object matching this schema:
 }
 `;
 
-      const result = await model.generateContent(prompt);
-      const rawText = result.response.text();
-      const cleanedText = rawText.replace(/```json/g, "").replace(/```/g, "").trim();
+      const result = await client.models.generateContent({
+        model: "gemini-2.5-flash",
+        contents: prompt,
+        config: {
+          responseMimeType: "application/json",
+        },
+      });
 
-      const jsonRes = JSON.parse(cleanedText);
-      if (Array.isArray(jsonRes.selected_question_ids) && jsonRes.selected_question_ids.length > 0) {
-        return {
-          selected_question_ids: jsonRes.selected_question_ids,
-          reasoning: jsonRes.reasoning || "Exam assembled using Gemini AI model.",
-        };
+      const rawText = result.text;
+      if (rawText) {
+        const jsonRes = JSON.parse(rawText);
+        if (Array.isArray(jsonRes.selected_question_ids) && jsonRes.selected_question_ids.length > 0) {
+          return {
+            selected_question_ids: jsonRes.selected_question_ids,
+            reasoning: jsonRes.reasoning || "Exam assembled using Gemini AI model.",
+          };
+        }
       }
     } catch (err) {
       console.error("Gemini API generation error:", err);
