@@ -58,6 +58,7 @@ export default function CreateExamPage() {
   const [modelsCount, setModelsCount] = useState(2);
   const [shuffleQuestions, setShuffleQuestions] = useState(true);
   const [shuffleChoices, setShuffleChoices] = useState(true);
+  const [template, setTemplate] = useState('classic');
 
   useEffect(() => { loadSubjects(); }, []);
   useEffect(() => {
@@ -166,6 +167,7 @@ export default function CreateExamPage() {
         total_marks: totalMark,
         total_questions: totalQuestions,
         models_count: modelsCount,
+        template_name: template,
         status: 'draft',
       }).select().single();
 
@@ -380,6 +382,28 @@ export default function CreateExamPage() {
                 className="w-4 h-4 accent-blue-600" />
               <span className="text-sm text-gray-700">خلط ترتيب الخيارات (أ/ب/ج/د) بين النماذج</span>
             </label>
+          </div>
+
+          <div className="border-t border-gray-100 pt-4">
+            <label className="block text-sm font-medium text-gray-600 mb-2">قالب الطباعة (شكل الامتحان)</label>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+              {[
+                { id: 'classic', title: 'كلاسيكي', desc: 'شكل رسمي وتقليدي', icon: '📄' },
+                { id: 'modern', title: 'حديث', desc: 'مساحات واسعة وخطوط واضحة', icon: '✨' },
+                { id: 'two-cols', title: 'أعمدة مزدوجة', desc: 'يوفر في استهلاك الورق', icon: '🗂️' }
+              ].map(t => (
+                <div key={t.id} onClick={() => setTemplate(t.id)}
+                  className={`p-3 rounded-xl border-2 cursor-pointer transition flex items-center gap-3 ${
+                    template === t.id ? 'border-blue-600 bg-blue-50' : 'border-gray-200 hover:border-blue-300 hover:bg-gray-50'
+                  }`}>
+                  <div className="text-2xl">{t.icon}</div>
+                  <div>
+                    <div className={`font-bold text-sm ${template === t.id ? 'text-blue-800' : 'text-gray-700'}`}>{t.title}</div>
+                    <div className="text-xs text-gray-500 mt-0.5">{t.desc}</div>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
 
           <div className="flex justify-between pt-2">
