@@ -2,7 +2,11 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Upload, CheckCircle, AlertCircle } from 'lucide-react';
+import { Upload, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+// @ts-ignore
+import * as pdfjsLib from 'pdfjs-dist/build/pdf';
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
 interface TeacherProfile {
   id: string;
@@ -50,15 +54,64 @@ export default function AdminUploadPDFPage() {
     }
   };
 
+  const cropImageFromPdf = async (pdfDoc: any, pageNumber: number, box: number[]): Promise<string | null> => {
+    try {
+      const page = await pdfDoc.getPage(pageNumber);
+      const scale = 2.0; // Render at higher resolution
+      const viewport = page.getViewport({ scale });
+      
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      if (!context) return null;
+
+      canvas.height = viewport.height;
+      canvas.width = viewport.width;
+
+      await page.render({ canvasContext: context, viewport }).promise;
+
+      // box is [ymin, xmin, ymax, xmax] scaled 0 to 1000
+      const [ymin, xmin, ymax, xmax] = box;
+      
+      const cropX = (xmin / 1000) * canvas.width;
+      const cropY = (ymin / 1000) * canvas.height;
+      const cropW = ((xmax - xmin) / 1000) * canvas.width;
+      const cropH = ((ymax - ymin) / 1000) * canvas.height;
+
+      // Add padding to crop
+      const padding = 10;
+      const finalX = Math.max(0, cropX - padding);
+      const finalY = Math.max(0, cropY - padding);
+      const finalW = Math.min(canvas.width - finalX, cropW + (padding * 2));
+      const finalH = Math.min(canvas.height - finalY, cropH + (padding * 2));
+
+      const cropCanvas = document.createElement('canvas');
+      cropCanvas.width = finalW;
+      cropCanvas.height = finalH;
+      const cropCtx = cropCanvas.getContext('2d');
+      
+      cropCtx?.drawImage(
+        canvas,
+        finalX, finalY, finalW, finalH,
+        0, 0, finalW, finalH
+      );
+
+      return cropCanvas.toDataURL('image/png');
+    } catch (e) {
+      console.error('Error cropping image from PDF:', e);
+      return null;
+    }
+  };
+
   const handleUploadAndProcess = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!file || !selectedTeacherId) return;
 
     setUploading(true);
-    setStatusMsg(null);
+    setStatusMsg({ type: 'success', text: 'يتم الآن تحليل الـ PDF بواسطة الذكاء الاصطناعي (قد يستغرق دقائق)...' });
 
     try {
-      const { uploadPdfAndSeedBank } = await import('./actions');
+      const { uploadPdfAndSeedBank, saveQuestionsBulk, uploadImageFromBase64 } = await import('./actions');
+      
       const formData = new FormData();
       formData.append('file', file);
       formData.append('teacherId', selectedTeacherId);
@@ -66,12 +119,54 @@ export default function AdminUploadPDFPage() {
       formData.append('chapterName', chapterName);
       formData.append('sourceName', sourceName || file.name);
 
-      const result = await uploadPdfAndSeedBank(formData);
-      if (!result.success) throw new Error(result.error);
+      // 1. Send to AI
+      const aiResult = await uploadPdfAndSeedBank(formData);
+      if (!aiResult.success || !aiResult.questions) {
+        throw new Error(aiResult.error || 'فشل استخراج الأسئلة');
+      }
+
+      setStatusMsg({ type: 'success', text: 'تم استخراج الأسئلة بنجاح. جاري الآن قص الصور للأسئلة الرسومية...' });
+
+      // 2. Process images if any question has a bounding box
+      const questionsWithImages = aiResult.questions.filter((q: any) => q.has_image && q.image_page_number && q.image_box);
+      
+      if (questionsWithImages.length > 0) {
+        const fileBuffer = await file.arrayBuffer();
+        const pdfDoc = await pdfjsLib.getDocument({ data: fileBuffer }).promise;
+
+        for (let i = 0; i < aiResult.questions.length; i++) {
+          const q = aiResult.questions[i];
+          if (q.has_image && q.image_page_number && q.image_box) {
+            setStatusMsg({ type: 'success', text: `جاري قص صورة السؤال رقم ${i + 1}...` });
+            
+            // Validate page number
+            const pageNum = Math.min(Math.max(1, q.image_page_number), pdfDoc.numPages);
+            
+            const base64Img = await cropImageFromPdf(pdfDoc, pageNum, q.image_box);
+            if (base64Img) {
+              const url = await uploadImageFromBase64(base64Img, selectedTeacherId);
+              if (url) q.final_image_url = url;
+            }
+          }
+        }
+      }
+
+      setStatusMsg({ type: 'success', text: 'جاري الحفظ في بنك الأسئلة...' });
+
+      // 3. Save to DB
+      const saveResult = await saveQuestionsBulk(
+        selectedTeacherId,
+        aiResult.sourceData.id,
+        selectedSubject,
+        chapterName,
+        aiResult.questions
+      );
+
+      if (!saveResult.success) throw new Error(saveResult.error);
 
       setStatusMsg({
         type: 'success',
-        text: result.message || `تم رفع الملف وتغذية بنك الأسئلة بنجاح!`,
+        text: `تم رفع الملف بنجاح وحفظ ${saveResult.count} سؤال في بنك الأسئلة (مرفق بها الصور)!`,
       });
       setFile(null);
       setSourceName('');
@@ -79,7 +174,7 @@ export default function AdminUploadPDFPage() {
       console.error(err);
       setStatusMsg({
         type: 'error',
-        text: err.message || 'حدث خطأ أثناء رفع كتاب PDF وتجهيز البنك.',
+        text: err.message || 'حدث خطأ أثناء معالجة المستند.',
       });
     } finally {
       setUploading(false);
@@ -89,22 +184,22 @@ export default function AdminUploadPDFPage() {
   return (
     <div className="max-w-3xl mx-auto space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-800">رفع كتاب PDF وتغذية بنك المعلم</h1>
+        <h1 className="text-2xl font-bold text-slate-800">رفع كتاب PDF وتغذية بنك المعلم (نظام الصور الآلي)</h1>
         <p className="text-slate-500 text-sm mt-1">
-          يتم تخزين ملفات PDF تلقائياً في Supabase Storage وربط الأسئلة بحساب المعلم المختار.
+          سيقوم النظام بقراءة الـ PDF، استخراج الأسئلة، واستخراج وقص الرسوم البيانية والصور وربطها بالأسئلة تلقائياً.
         </p>
       </div>
 
       {statusMsg && (
         <div
-          className={`p-4 rounded-xl text-sm font-semibold flex items-center gap-2 ${
+          className={`p-4 rounded-xl text-sm font-semibold flex items-center gap-3 ${
             statusMsg.type === 'success'
-              ? 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+              ? uploading ? 'bg-blue-100 text-blue-800 border border-blue-300' : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
               : 'bg-red-100 text-red-800 border border-red-300'
           }`}
         >
           {statusMsg.type === 'success' ? (
-            <CheckCircle className="w-5 h-5 shrink-0" />
+             uploading ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" /> : <CheckCircle className="w-5 h-5 shrink-0" />
           ) : (
             <AlertCircle className="w-5 h-5 shrink-0" />
           )}
@@ -193,11 +288,14 @@ export default function AdminUploadPDFPage() {
           className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold rounded-xl shadow-lg shadow-blue-600/30 transition flex items-center justify-center gap-2"
         >
           {uploading ? (
-            <span>جاري الرفع والمعالجة...</span>
+            <>
+              <Loader2 className="w-5 h-5 animate-spin" />
+              <span>جاري المعالجة الذكية للأسئلة والصور...</span>
+            </>
           ) : (
             <>
               <Upload className="w-5 h-5" />
-              <span>رفع الكورسات وتغذية البنك</span>
+              <span>رفع المستند واستخراج الأسئلة والصور</span>
             </>
           )}
         </button>
