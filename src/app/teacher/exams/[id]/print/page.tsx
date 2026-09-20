@@ -28,6 +28,7 @@ interface Question {
   model_answer: string | null;
   chapter: string | null;
   marks?: number;
+  image_urls: string[] | null;
 }
 
 interface Exam {
@@ -80,7 +81,7 @@ export default function ExamPrintPage() {
       .select(`
         question_id,
         questions (
-          id, text, question_type, model_answer, chapter,
+          id, text, question_type, model_answer, chapter, image_urls,
           choices:question_choices(*)
         )
       `)
@@ -242,10 +243,15 @@ export default function ExamPrintPage() {
                     </h2>
                     <div className="space-y-4">
                       {mcqs.map((q, qi) => (
-                        <div key={q.id} className="break-inside-avoid">
+                        <div key={q.id} className="break-inside-avoid mb-4">
                           <p className="text-sm font-bold text-gray-900 mb-1.5 leading-relaxed">
                             {qi + 1}. {q.text}
                           </p>
+                          {q.image_urls && q.image_urls.length > 0 && (
+                            <div className="mb-3">
+                              <img src={q.image_urls[0]} alt="سؤال رسم بياني" className="max-w-full h-auto max-h-48 object-contain border border-gray-200 rounded shadow-sm" />
+                            </div>
+                          )}
                           {q.choices && (
                             <div className={`grid gap-1.5 ${template==='two-cols'?'grid-cols-1':'grid-cols-2'} pr-4`}>
                               {q.choices.map((c, ci) => (
@@ -272,13 +278,20 @@ export default function ExamPrintPage() {
                     </h2>
                     <div className="space-y-3">
                       {tfs.map((q, qi) => (
-                        <div key={q.id} className="flex items-start gap-3 break-inside-avoid">
-                          <p className="text-sm font-bold text-gray-900 flex-1 leading-relaxed">
-                            {mcqs.length + qi + 1}. {q.text}
-                          </p>
-                          <div className="flex gap-2 shrink-0 pt-0.5">
-                            <span className="w-8 h-8 rounded-full border border-gray-400 inline-block"></span>
+                        <div key={q.id} className="flex flex-col gap-2 break-inside-avoid mb-4">
+                          <div className="flex items-start gap-3">
+                            <p className="text-sm font-bold text-gray-900 flex-1 leading-relaxed">
+                              {mcqs.length + qi + 1}. {q.text}
+                            </p>
+                            <div className="flex gap-2 shrink-0 pt-0.5">
+                              <span className="w-8 h-8 rounded-full border border-gray-400 inline-block"></span>
+                            </div>
                           </div>
+                          {q.image_urls && q.image_urls.length > 0 && (
+                            <div className="mb-2">
+                              <img src={q.image_urls[0]} alt="سؤال رسم بياني" className="max-w-full h-auto max-h-48 object-contain border border-gray-200 rounded shadow-sm" />
+                            </div>
+                          )}
                         </div>
                       ))}
                     </div>
@@ -293,10 +306,15 @@ export default function ExamPrintPage() {
                     </h2>
                     <div className="space-y-6">
                       {essays.map((q, qi) => (
-                        <div key={q.id} className="break-inside-avoid">
+                        <div key={q.id} className="break-inside-avoid mb-6">
                           <p className="text-sm font-bold text-gray-900 mb-2 leading-relaxed">
                             {mcqs.length + tfs.length + qi + 1}. {q.text}
                           </p>
+                          {q.image_urls && q.image_urls.length > 0 && (
+                            <div className="mb-4">
+                              <img src={q.image_urls[0]} alt="سؤال رسم بياني" className="max-w-full h-auto max-h-48 object-contain border border-gray-200 rounded shadow-sm" />
+                            </div>
+                          )}
                           <div className="space-y-2 mt-4">
                             <div className="border-b border-dashed border-gray-400 h-6" />
                             <div className="border-b border-dashed border-gray-400 h-6" />

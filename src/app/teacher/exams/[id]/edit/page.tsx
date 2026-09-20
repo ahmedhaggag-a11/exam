@@ -29,6 +29,7 @@ interface Question {
   model_answer: string | null;
   chapter: string | null;
   marks?: number;
+  image_urls: string[] | null;
 }
 
 interface Exam {
@@ -88,7 +89,7 @@ export default function ExamEditPage() {
         question_id,
         order_index,
         questions (
-          id, text, question_type, model_answer, chapter,
+          id, text, question_type, model_answer, chapter, image_urls,
           choices:question_choices(*)
         )
       `)
@@ -257,7 +258,14 @@ export default function ExamEditPage() {
                       </div>
                     </div>
                   ) : (
-                    <p className="text-sm text-gray-800 font-medium leading-relaxed">{q.text}</p>
+                    <>
+                      <p className="text-sm text-gray-800 font-medium leading-relaxed">{q.text}</p>
+                      {q.image_urls && q.image_urls.length > 0 && (
+                        <div className="my-3">
+                          <img src={q.image_urls[0]} alt="صورة توضيحية" className="max-w-full h-auto max-h-40 border border-gray-200 rounded object-contain" />
+                        </div>
+                      )}
+                    </>
                   )}
 
                   {q.choices && q.choices.length > 0 && editingQ !== q.id && (

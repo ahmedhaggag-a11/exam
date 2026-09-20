@@ -64,6 +64,11 @@ export default function AdminQuestionBankPage() {
                   </div>
                 </div>
                 <p className="font-bold text-slate-800 text-base">{q.text}</p>
+                {q.image_urls && q.image_urls.length > 0 && (
+                  <div className="my-3">
+                    <img src={q.image_urls[0]} alt="صورة السؤال" className="max-w-full h-auto max-h-48 rounded border border-slate-200 shadow-sm" />
+                  </div>
+                )}
                 {q.choices && q.choices.length > 0 && (
                   <div className="grid grid-cols-2 gap-2 pt-2">
                     {q.choices.map((c) => (
