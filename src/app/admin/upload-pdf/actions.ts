@@ -67,15 +67,20 @@ async function extractQuestionsFromPDF(
 }`;
 
     const result = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
+      model: 'gemini-1.5-flash',
       contents: [
         {
-          inlineData: {
-            data: pdfBase64,
-            mimeType: 'application/pdf',
-          },
+          role: 'user',
+          parts: [
+            {
+              inlineData: {
+                data: pdfBase64,
+                mimeType: 'application/pdf',
+              },
+            },
+            { text: prompt },
+          ],
         },
-        prompt,
       ],
       config: {
         responseMimeType: 'application/json',
