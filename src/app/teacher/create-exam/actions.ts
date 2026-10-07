@@ -102,13 +102,26 @@ ${JSON.stringify(bankSummary)}
 أعد JSON فقط بهذا الشكل:
 {"selected_question_ids": ["id1", "id2", ...], "reasoning": "سبب الاختيار"}`;
 
-    const result = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: prompt,
-      config: { responseMimeType: 'application/json' },
-    });
+    const CANDIDATE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.6-flash', 'gemini-3.1-flash-lite'];
+    let text: string | undefined = undefined;
 
-    const text = result.text;
+    for (const mName of CANDIDATE_MODELS) {
+      try {
+        const result = await ai.models.generateContent({
+          model: mName,
+          contents: prompt,
+          config: { responseMimeType: 'application/json' },
+        });
+        if (result && result.text) {
+          text = result.text;
+          break;
+        }
+      } catch (err) {
+        console.warn(`generateExamAction model ${mName} failed:`, err);
+        await new Promise(r => setTimeout(r, 800));
+      }
+    }
+
     if (!text) return fallback();
 
     const parsed = JSON.parse(text);

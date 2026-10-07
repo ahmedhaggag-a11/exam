@@ -57,15 +57,28 @@ Return strictly a valid JSON object matching this schema:
 }
 `;
 
-      const result = await client.models.generateContent({
-        model: "gemini-3.6-flash",
-        contents: prompt,
-        config: {
-          responseMimeType: "application/json",
-        },
-      });
+      const CANDIDATE_MODELS = ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite"];
+      let rawText: string | undefined = undefined;
 
-      const rawText = result.text;
+      for (const mName of CANDIDATE_MODELS) {
+        try {
+          const result = await client.models.generateContent({
+            model: mName,
+            contents: prompt,
+            config: {
+              responseMimeType: "application/json",
+            },
+          });
+          if (result && result.text) {
+            rawText = result.text;
+            break;
+          }
+        } catch (mErr) {
+          console.warn(`Gemini exam generation attempt failed with ${mName}:`, mErr);
+          await new Promise(r => setTimeout(r, 800));
+        }
+      }
+
       if (rawText) {
         const jsonRes = JSON.parse(rawText);
         if (Array.isArray(jsonRes.selected_question_ids) && jsonRes.selected_question_ids.length > 0) {

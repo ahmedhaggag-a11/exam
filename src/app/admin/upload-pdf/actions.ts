@@ -66,29 +66,55 @@ async function extractQuestionsFromPDF(
   ]
 }`;
 
-    const result = await ai.models.generateContent({
-      model: 'gemini-3.6-flash',
-      contents: [
-        {
-          role: 'user',
-          parts: [
-            {
-              inlineData: {
-                data: pdfBase64,
-                mimeType: 'application/pdf',
-              },
-            },
-            { text: prompt },
-          ],
-        },
-      ],
-      config: {
-        responseMimeType: 'application/json',
-      },
-    });
+    const CANDIDATE_MODELS = [
+      'gemini-3.5-flash-lite',
+      'gemini-3.6-flash',
+      'gemini-3.1-flash-lite',
+    ];
 
-    const responseText = result.text;
-    if (!responseText) return [];
+    let lastError: any = null;
+    let responseText: string | undefined = undefined;
+
+    for (const modelName of CANDIDATE_MODELS) {
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const result = await ai.models.generateContent({
+            model: modelName,
+            contents: [
+              {
+                role: 'user',
+                parts: [
+                  {
+                    inlineData: {
+                      data: pdfBase64,
+                      mimeType: 'application/pdf',
+                    },
+                  },
+                  { text: prompt },
+                ],
+              },
+            ],
+            config: {
+              responseMimeType: 'application/json',
+            },
+          });
+          if (result && result.text) {
+            responseText = result.text;
+            break;
+          }
+        } catch (err: any) {
+          lastError = err;
+          console.warn(`Gemini extraction attempt failed with model ${modelName}:`, err?.message || err);
+          await new Promise(r => setTimeout(r, 1000));
+        }
+      }
+      if (responseText) break;
+    }
+
+    if (!responseText) {
+      if (lastError) throw lastError;
+      return [];
+    }
     
     const parsed = JSON.parse(responseText);
     return parsed.questions || [];
