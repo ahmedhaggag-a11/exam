@@ -3,6 +3,10 @@
 import { useState, useEffect } from 'react';
 import { useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
+import { ExamPaperConfig, DEFAULT_PAPER_CONFIG } from '@/types/paper-config';
+import { getPaperTemplateConfig } from '@/app/admin/paper-templates/actions';
+import { ExamPaperRenderer } from '@/components/exam/ExamPaperRenderer';
+import { Sliders, Printer, ArrowRight, Eye, CheckCircle2 } from 'lucide-react';
 
 interface ExamModel {
   id: string;
@@ -33,6 +37,7 @@ interface Question {
 
 interface Exam {
   id: string;
+  teacher_id?: string;
   title: string;
   subject: string;
   grade_level: string;
@@ -42,7 +47,7 @@ interface Exam {
   models_count: number;
   instructions: string;
   status: string;
-  template_name: string; // 'classic', 'modern', 'two-cols'
+  template_name: string;
 }
 
 export default function ExamPrintPage() {
@@ -53,21 +58,36 @@ export default function ExamPrintPage() {
   const [models, setModels] = useState<ExamModel[]>([]);
   const [questions, setQuestions] = useState<Record<string, Question>>({});
   const [showAnswerKey, setShowAnswerKey] = useState(false);
-  const [template, setTemplate] = useState('classic'); // Default template
+  const [config, setConfig] = useState<ExamPaperConfig>(DEFAULT_PAPER_CONFIG);
+  const [quickColumns, setQuickColumns] = useState<1 | 2>(1);
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { loadExam(); }, [id]);
+  useEffect(() => {
+    loadExamAndConfig();
+  }, [id]);
 
-  async function loadExam() {
+  async function loadExamAndConfig() {
     setLoading(true);
     const { data: examData } = await supabase
       .from('exams')
       .select('*')
       .eq('id', id)
       .single();
-    if (!examData) { setLoading(false); return; }
+
+    if (!examData) {
+      setLoading(false);
+      return;
+    }
     setExam(examData as Exam);
-    setTemplate(examData.template_name || 'classic');
+
+    // Fetch the customized template for this teacher or the admin global template
+    try {
+      const cfg = await getPaperTemplateConfig(examData.teacher_id);
+      setConfig(cfg);
+      setQuickColumns(cfg.columns || 1);
+    } catch (e) {
+      console.warn('Using default paper config:', e);
+    }
 
     const { data: modelsData } = await supabase
       .from('exam_models')
@@ -81,7 +101,7 @@ export default function ExamPrintPage() {
       .select(`
         question_id,
         questions (
-          id, text, question_type, model_answer, chapter, image_urls,
+          id, text, question_type, model_answer, chapter, image_urls, marks,
           choices:question_choices(*)
         )
       `)
@@ -97,7 +117,7 @@ export default function ExamPrintPage() {
 
   function getModelQuestions(model: ExamModel): Question[] {
     const result: Question[] = [];
-    (model.questions_order || []).forEach(qid => {
+    (model.questions_order || []).forEach((qid) => {
       if (!questions[qid]) return;
       const q = { ...questions[qid] };
       if (model.choices_order?.[qid] && q.choices) {
@@ -117,279 +137,204 @@ export default function ExamPrintPage() {
     window.print();
   }
 
-  async function handleTemplateChange(newTemp: string) {
-    setTemplate(newTemp);
-    if (exam) {
-      await supabase.from('exams').update({ template_name: newTemp }).eq('id', exam.id);
-    }
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center min-h-[400px]">
+        <div className="w-10 h-10 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
+      </div>
+    );
   }
 
-  if (loading) return (
-    <div className="flex items-center justify-center h-64">
-      <div className="w-8 h-8 border-4 border-blue-600 border-t-transparent rounded-full animate-spin" />
-    </div>
-  );
-  if (!exam) return <div className="p-12 text-center text-red-600 font-bold text-xl">❌ الامتحان غير موجود</div>;
+  if (!exam) {
+    return (
+      <div className="p-12 text-center text-red-600 font-bold text-xl">
+        ❌ الامتحان غير موجود
+      </div>
+    );
+  }
 
-  const modelGroups = models.length > 0 ? models : [{ id: 'default', model_name: 'أ', questions_order: Object.keys(questions), choices_order: {} }];
+  const modelGroups =
+    models.length > 0
+      ? models
+      : [
+          {
+            id: 'default',
+            model_code: 'A',
+            model_name: 'أ',
+            questions_order: Object.keys(questions),
+            choices_order: {},
+          },
+        ];
+
+  // Effective Config with Quick-Toggle support
+  const effectiveConfig: ExamPaperConfig = {
+    ...config,
+    columns: quickColumns,
+  };
 
   return (
     <>
-      {/* Print Controls - hidden when printing */}
-      <div className="no-print fixed top-0 left-0 right-0 bg-white border-b border-gray-200 z-50 px-6 py-3 flex items-center justify-between shadow-sm">
-        <h1 className="font-bold text-gray-800 truncate pl-4">{exam.title}</h1>
-        <div className="flex items-center gap-4 text-sm flex-wrap">
-          <div className="flex items-center gap-2 border-r border-gray-300 pr-4">
-            <span className="text-gray-600">شكل القالب:</span>
-            <select value={template} onChange={e => handleTemplateChange(e.target.value)}
-              className="border border-gray-300 rounded px-2 py-1 outline-none text-sm bg-gray-50 hover:bg-white focus:ring-2 focus:ring-blue-500">
-              <option value="classic">كلاسيكي (رسمي)</option>
-              <option value="modern">حديث (مساحات واسعة)</option>
-              <option value="two-cols">أعمدة مزدوجة (يوفر الورق)</option>
-            </select>
-          </div>
-          <label className="flex items-center gap-2 cursor-pointer border-r border-gray-300 pr-4">
-            <input type="checkbox" checked={showAnswerKey} onChange={e => setShowAnswerKey(e.target.checked)}
-              className="w-4 h-4 accent-blue-600" />
-            <span className="font-medium text-gray-700">تضمين نموذج الإجابة</span>
-          </label>
-          <button onClick={handlePrint}
-            className="px-5 py-1.5 bg-blue-600 text-white rounded-lg font-medium hover:bg-blue-700 transition shadow-sm">
-            🖨️ طباعة
-          </button>
-          <a href={`/teacher/exams/${id}/edit`}
-            className="px-4 py-1.5 border border-gray-300 text-gray-600 rounded-lg hover:bg-gray-50 transition">
-            ← رجوع
+      {/* Print Controls Floating Bar - Hidden in Print */}
+      <nav className="no-print fixed top-0 left-0 right-0 bg-white/95 backdrop-blur-md border-b border-slate-200 z-50 px-6 py-3 flex items-center justify-between shadow-sm">
+        <div className="flex items-center gap-3">
+          <a
+            href={`/teacher/exams/${id}/edit`}
+            className="flex items-center gap-1.5 px-3 py-1.5 border border-slate-200 text-slate-700 rounded-lg hover:bg-slate-50 transition text-xs font-bold"
+          >
+            <ArrowRight className="w-4 h-4" />
+            <span>رجوع لتعديل الامتحان</span>
           </a>
+          <h1 className="font-black text-slate-800 text-sm hidden sm:block truncate max-w-xs">
+            {exam.title}
+          </h1>
         </div>
-      </div>
 
-      <div className={`pt-20 pb-10 no-print-padding bg-gray-100 min-h-screen template-${template}`}>
+        <div className="flex items-center gap-4 text-xs font-bold">
+          {/* Quick Column Switch */}
+          <div className="flex items-center gap-1.5 bg-slate-100 p-1 rounded-lg border border-slate-200">
+            <span className="text-slate-500 pr-1">الأعمدة:</span>
+            <button
+              onClick={() => setQuickColumns(1)}
+              className={`px-2.5 py-1 rounded transition ${
+                quickColumns === 1
+                  ? 'bg-white text-blue-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              عمود واحد
+            </button>
+            <button
+              onClick={() => setQuickColumns(2)}
+              className={`px-2.5 py-1 rounded transition ${
+                quickColumns === 2
+                  ? 'bg-white text-blue-700 shadow-xs'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              عمودين (توفير ورق)
+            </button>
+          </div>
+
+          {/* Answer Key Toggle */}
+          <label className="flex items-center gap-2 cursor-pointer border-r border-slate-200 pr-3">
+            <input
+              type="checkbox"
+              checked={showAnswerKey}
+              onChange={(e) => setShowAnswerKey(e.target.checked)}
+              className="w-4 h-4 accent-blue-600 rounded"
+            />
+            <span className="text-slate-700">تضمين نموذج الإجابة</span>
+          </label>
+
+          {/* Print Button */}
+          <button
+            onClick={handlePrint}
+            className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md shadow-blue-600/20 transition"
+          >
+            <Printer className="w-4 h-4" />
+            <span>طباعة الورقة (Print / PDF)</span>
+          </button>
+        </div>
+      </nav>
+
+      {/* RENDERED EXAM PAPER PAGES */}
+      <div className="pt-20 pb-16 bg-slate-100 min-h-screen space-y-8 no-print-bg">
         {modelGroups.map((model) => {
           const modelQs = getModelQuestions(model as ExamModel);
-          const mcqs = modelQs.filter(q => q.question_type === 'mcq');
-          const tfs = modelQs.filter(q => q.question_type === 'true_false');
-          const essays = modelQs.filter(q => q.question_type === 'essay');
-
-          // Template variables
-          const pageClass = template === 'modern' ? 'bg-white rounded-2xl shadow-xl p-10 max-w-5xl mx-auto border-t-8 border-blue-600' :
-                            template === 'two-cols' ? 'bg-white rounded shadow-sm p-6 max-w-6xl mx-auto' :
-                            'bg-white rounded shadow p-8 max-w-4xl mx-auto border border-gray-300';
-          const headerClass = template === 'modern' ? 'flex flex-col items-center mb-8 gap-2 pb-6 border-b-2 border-gray-100' :
-                              'text-center border-b-2 border-gray-800 pb-4 mb-6';
 
           return (
-            <div key={model.id} className={`print-page mb-8 ${pageClass}`}>
-              {/* Exam Header */}
-              <div className={headerClass}>
-                {template === 'modern' ? (
-                  <>
-                    <h1 className="text-3xl font-black text-gray-800 mb-1">{exam.title}</h1>
-                    <div className="flex gap-4 text-sm font-semibold text-gray-500 bg-gray-50 px-4 py-2 rounded-full">
-                      <span>{exam.subject}</span>•<span>{exam.grade_level}</span>•<span>{exam.duration_minutes} دقيقة</span>
-                    </div>
-                    <div className="mt-2 text-blue-600 font-bold text-xl">{model.model_name}</div>
-                  </>
-                ) : (
-                  <div className="flex items-center justify-between mb-2">
-                    <div className="text-sm text-gray-800 text-right w-1/3">
-                      <p>المادة: <strong className="text-base">{exam.subject}</strong></p>
-                      <p>الصف: <strong>{exam.grade_level}</strong></p>
-                    </div>
-                    <div className="text-center w-1/3">
-                      <h1 className="text-2xl font-bold text-gray-900 leading-tight">{exam.title}</h1>
-                      <p className="text-lg font-bold mt-1 inline-block border-2 border-black px-3 py-0.5 rounded-full">{model.model_name}</p>
-                    </div>
-                    <div className="text-sm text-gray-800 text-left w-1/3">
-                      <p>الزمن: <strong>{exam.duration_minutes} دقيقة</strong></p>
-                      <p>الدرجة: <strong>{exam.total_marks} درجة</strong></p>
-                    </div>
-                  </div>
-                )}
-
-                {/* Student Info Box */}
-                <div className={`mt-4 flex flex-wrap gap-6 text-sm font-medium ${template==='modern'?'w-full justify-between bg-gray-50 p-4 rounded-xl border border-gray-100':'justify-center'}`}>
-                  <div className="flex gap-2 items-center flex-1">
-                    <span>اسم الطالب:</span>
-                    <div className="border-b border-black flex-1 h-5 min-w-[200px]" />
-                  </div>
-                  <div className="flex gap-2 items-center">
-                    <span>رقم الجلوس:</span>
-                    <div className="border-b border-black w-24 h-5" />
-                  </div>
-                  {exam.exam_date && (
-                    <div className="flex gap-2 items-center">
-                      <span>التاريخ:</span>
-                      <span>{new Date(exam.exam_date).toLocaleDateString('ar-EG')}</span>
-                    </div>
-                  )}
-                </div>
-
-                {exam.instructions && (
-                  <div className={`mt-4 text-xs font-semibold ${template==='modern'?'bg-blue-50 text-blue-800 p-3 rounded-lg w-full':'text-gray-800 border border-gray-300 p-2 text-right'}`}>
-                    📌 تعليمات: {exam.instructions}
-                  </div>
-                )}
-              </div>
-
-              {/* QUESTIONS BODY */}
-              <div className={template === 'two-cols' ? 'columns-1 md:columns-2 gap-8' : ''}>
-                
-                {/* MCQ Section */}
-                {mcqs.length > 0 && (
-                  <div className="mb-6 break-inside-avoid">
-                    <h2 className={`font-bold mb-4 ${template==='modern'?'text-lg text-blue-800 bg-blue-50 inline-block px-3 py-1 rounded':'text-base text-gray-900 border-b border-black pb-1'}`}>
-                      السؤال الأول: اختر الإجابة الصحيحة
-                    </h2>
-                    <div className="space-y-4">
-                      {mcqs.map((q, qi) => (
-                        <div key={q.id} className="break-inside-avoid mb-4">
-                          <p className="text-sm font-bold text-gray-900 mb-1.5 leading-relaxed">
-                            {qi + 1}. {q.text}
-                          </p>
-                          {q.image_urls && q.image_urls.length > 0 && (
-                            <div className="mb-3">
-                              <img src={q.image_urls[0]} alt="سؤال رسم بياني" className="max-w-full h-auto max-h-48 object-contain border border-gray-200 rounded shadow-sm" />
-                            </div>
-                          )}
-                          {q.choices && (
-                            <div className={`grid gap-1.5 ${template==='two-cols'?'grid-cols-1':'grid-cols-2'} pr-4`}>
-                              {q.choices.map((c, ci) => (
-                                <p key={c.id} className="text-sm text-gray-800 font-medium">
-                                  <span className="inline-block w-6 text-gray-600">
-                                    {['أ', 'ب', 'ج', 'د', 'هـ', 'و'][ci] || c.choice_code})
-                                  </span> 
-                                  {c.text}
-                                </p>
-                              ))}
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* True/False Section */}
-                {tfs.length > 0 && (
-                  <div className="mb-6 break-inside-avoid">
-                    <h2 className={`font-bold mb-4 ${template==='modern'?'text-lg text-blue-800 bg-blue-50 inline-block px-3 py-1 rounded':'text-base text-gray-900 border-b border-black pb-1'}`}>
-                      السؤال الثاني: ضع علامة (✓) أو (✗)
-                    </h2>
-                    <div className="space-y-3">
-                      {tfs.map((q, qi) => (
-                        <div key={q.id} className="flex flex-col gap-2 break-inside-avoid mb-4">
-                          <div className="flex items-start gap-3">
-                            <p className="text-sm font-bold text-gray-900 flex-1 leading-relaxed">
-                              {mcqs.length + qi + 1}. {q.text}
-                            </p>
-                            <div className="flex gap-2 shrink-0 pt-0.5">
-                              <span className="w-8 h-8 rounded-full border border-gray-400 inline-block"></span>
-                            </div>
-                          </div>
-                          {q.image_urls && q.image_urls.length > 0 && (
-                            <div className="mb-2">
-                              <img src={q.image_urls[0]} alt="سؤال رسم بياني" className="max-w-full h-auto max-h-48 object-contain border border-gray-200 rounded shadow-sm" />
-                            </div>
-                          )}
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Essay Section */}
-                {essays.length > 0 && (
-                  <div className="mb-6 break-inside-avoid">
-                    <h2 className={`font-bold mb-4 ${template==='modern'?'text-lg text-blue-800 bg-blue-50 inline-block px-3 py-1 rounded':'text-base text-gray-900 border-b border-black pb-1'}`}>
-                      السؤال الثالث: أجب عن الأسئلة التالية
-                    </h2>
-                    <div className="space-y-6">
-                      {essays.map((q, qi) => (
-                        <div key={q.id} className="break-inside-avoid mb-6">
-                          <p className="text-sm font-bold text-gray-900 mb-2 leading-relaxed">
-                            {mcqs.length + tfs.length + qi + 1}. {q.text}
-                          </p>
-                          {q.image_urls && q.image_urls.length > 0 && (
-                            <div className="mb-4">
-                              <img src={q.image_urls[0]} alt="سؤال رسم بياني" className="max-w-full h-auto max-h-48 object-contain border border-gray-200 rounded shadow-sm" />
-                            </div>
-                          )}
-                          <div className="space-y-2 mt-4">
-                            <div className="border-b border-dashed border-gray-400 h-6" />
-                            <div className="border-b border-dashed border-gray-400 h-6" />
-                            <div className="border-b border-dashed border-gray-400 h-6" />
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </div>
-
-              {/* Footer */}
-              <div className="mt-8 pt-4 border-t border-gray-300 flex justify-between text-xs font-medium text-gray-500">
-                <span>{model.model_name}</span>
-                <span>تم الإنشاء عبر منصة ExamForge</span>
-                <span>{exam.title}</span>
-              </div>
+            <div key={model.id} className="print-page-wrapper">
+              <ExamPaperRenderer
+                config={effectiveConfig}
+                exam={{
+                  title: exam.title,
+                  subject: exam.subject,
+                  grade_level: exam.grade_level,
+                  duration_minutes: exam.duration_minutes,
+                  total_marks: exam.total_marks,
+                  exam_date: exam.exam_date,
+                  instructions: exam.instructions,
+                }}
+                modelName={model.model_name}
+                questions={modelQs}
+                isPreview={false}
+              />
             </div>
           );
         })}
 
-        {/* Answer Key Page */}
+        {/* Answer Key Section */}
         {showAnswerKey && (
-          <div className="print-page mt-8 bg-white rounded shadow p-8 max-w-4xl mx-auto border-t-8 border-green-600">
-            <h2 className="text-2xl font-black text-center text-gray-800 border-b-2 border-gray-200 pb-4 mb-8">
-              نموذج الإجابات — {exam.title}
-            </h2>
+          <div className="print-page-wrapper">
+            <div
+              dir="rtl"
+              className="bg-white p-8 max-w-5xl mx-auto border-2 border-emerald-600 rounded-xl shadow-md"
+            >
+              <h2 className="text-xl font-black text-center text-slate-900 border-b-2 border-emerald-600 pb-3 mb-6">
+                نموذج الإجابات الرسمية والشرح — {exam.title}
+              </h2>
 
-            {modelGroups.map((model) => {
-              const modelQs = getModelQuestions(model as ExamModel);
-              return (
-                <div key={model.id} className="mb-8 bg-gray-50 rounded-xl p-6 border border-gray-200">
-                  <h3 className="font-bold text-lg text-green-700 mb-4 flex items-center gap-2">
-                    <span className="bg-green-100 p-1 rounded">📋</span> {model.model_name}
-                  </h3>
-                  <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
-                    {modelQs.map((q, qi) => {
-                      let ans = q.model_answer;
-                      if (q.question_type === 'mcq' && q.choices) {
-                        const correct = q.choices.find(c => c.is_correct);
-                        ans = correct ? `${correct.choice_code}. ${correct.text}` : '—';
-                      }
-                      return (
-                        <div key={q.id} className="text-sm border border-gray-200 rounded p-2 bg-white shadow-sm flex gap-2 items-start">
-                          <span className="font-bold text-gray-400 w-5">{qi + 1}.</span>
-                          <span className={`font-semibold ${q.question_type==='mcq'?'text-blue-700':'text-green-700'}`}>
-                            {ans || '—'}
-                          </span>
-                        </div>
-                      );
-                    })}
+              {modelGroups.map((model) => {
+                const modelQs = getModelQuestions(model as ExamModel);
+                return (
+                  <div key={model.id} className="mb-6 bg-slate-50 p-4 rounded-xl border border-slate-200">
+                    <h3 className="font-bold text-sm text-emerald-800 mb-3 flex items-center gap-1.5">
+                      <CheckCircle2 className="w-4 h-4 text-emerald-600" />
+                      <span>إجابات النموذج ({model.model_name})</span>
+                    </h3>
+                    <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-2.5">
+                      {modelQs.map((q, qi) => {
+                        let ans = q.model_answer;
+                        if (q.question_type === 'mcq' && q.choices) {
+                          const correct = q.choices.find((c) => c.is_correct);
+                          ans = correct
+                            ? `${correct.choice_code}. ${correct.text}`
+                            : '—';
+                        }
+                        return (
+                          <div
+                            key={q.id}
+                            className="text-xs border border-slate-200 rounded-lg p-2 bg-white flex gap-1.5 items-start"
+                          >
+                            <span className="font-bold text-slate-400 w-5">{qi + 1}.</span>
+                            <span className="font-bold text-emerald-700 truncate">{ans || '—'}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
                   </div>
-                </div>
-              );
-            })}
+                );
+              })}
+            </div>
           </div>
         )}
       </div>
 
+      {/* Global CSS for Print Output */}
       <style jsx global>{`
         @media print {
-          .no-print { display: none !important; }
-          body { padding-top: 0 !important; background: white !important; }
-          .print-page { 
-            box-shadow: none !important; 
-            margin: 0 !important; 
-            padding: 20px !important; 
-            border: none !important;
-            page-break-after: always; 
-            max-width: 100% !important;
+          .no-print {
+            display: none !important;
           }
-          .print-page:last-child { page-break-after: avoid; }
-          .columns-1, .columns-2 { columns: auto !important; }
-          .template-two-cols .columns-1 { columns: 2 !important; column-gap: 40px !important; }
+          .no-print-bg {
+            background: white !important;
+            padding: 0 !important;
+            margin: 0 !important;
+          }
+          body {
+            padding: 0 !important;
+            background: white !important;
+          }
+          .print-page-wrapper {
+            page-break-after: always;
+            break-after: page;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          .print-page-wrapper:last-child {
+            page-break-after: avoid;
+            break-after: avoid;
+          }
         }
       `}</style>
     </>

@@ -11,6 +11,7 @@ import {
   LayoutDashboard,
   LogOut,
   ShieldAlert,
+  Sliders,
 } from 'lucide-react';
 
 export default function AdminLayout({
@@ -30,6 +31,7 @@ export default function AdminLayout({
 
   const navItems = [
     { href: '/admin', label: 'لوحة التحكم', icon: LayoutDashboard },
+    { href: '/admin/paper-templates', label: 'تخصيص شكل ورقة الامتحان', icon: Sliders },
     { href: '/admin/teachers', label: 'إدارة المعلمين', icon: Users },
     { href: '/admin/upload-pdf', label: 'رفع كتب PDF وتغذية البنك', icon: Upload },
     { href: '/admin/question-bank', label: 'بنك الأسئلة الشامل', icon: BookOpen },

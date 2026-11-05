@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Users, FileText, HelpCircle, FileCheck, Plus, Upload } from 'lucide-react';
+import { Users, FileText, HelpCircle, FileCheck, Plus, Upload, Sliders } from 'lucide-react';
 import Link from 'next/link';
 
 export default function AdminDashboardPage() {
@@ -80,7 +80,22 @@ export default function AdminDashboardPage() {
 
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         <h3 className="text-lg font-bold text-slate-800">إجراءات إدارية سريعة</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <Link
+            href="/admin/paper-templates"
+            className="flex items-center justify-between p-4 rounded-xl border border-slate-200 hover:border-indigo-500 hover:bg-indigo-50/50 transition group"
+          >
+            <div className="flex items-center gap-3">
+              <div className="p-3 bg-indigo-100 text-indigo-600 rounded-lg group-hover:bg-indigo-600 group-hover:text-white transition">
+                <Sliders className="w-5 h-5" />
+              </div>
+              <div>
+                <span className="font-bold text-slate-800 block text-sm">تخصيص شكل ورقة الامتحان</span>
+                <span className="text-xs text-slate-500">تحكم بالترويسة والعلامة المائية لكل مدرس</span>
+              </div>
+            </div>
+          </Link>
+
           <Link
             href="/admin/teachers"
             className="flex items-center justify-between p-4 rounded-xl border border-slate-200 hover:border-blue-500 hover:bg-blue-50/50 transition group"
