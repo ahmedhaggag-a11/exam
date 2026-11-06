@@ -124,6 +124,14 @@ export default function ExamsPage() {
                 </div>
 
                 <div className="flex items-center gap-2 shrink-0 flex-wrap">
+                  <Link href={`/teacher/exams/${exam.id}/bubble-sheet`} target="_blank"
+                    className="px-3 py-1.5 bg-indigo-50 border border-indigo-200 text-indigo-700 rounded-lg text-xs font-bold hover:bg-indigo-100 transition flex items-center gap-1 shadow-xs">
+                    <span>📝 بابل شيت</span>
+                  </Link>
+                  <Link href={`/teacher/exams/${exam.id}/scanner`}
+                    className="px-3 py-1.5 bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-lg text-xs font-bold hover:bg-emerald-100 transition flex items-center gap-1 shadow-xs">
+                    <span>📱 تصحيح بالكاميرا</span>
+                  </Link>
                   <Link href={`/teacher/exams/${exam.id}/edit`}
                     className="px-3 py-1.5 border border-blue-200 text-blue-700 rounded-lg text-xs hover:bg-blue-50 transition">
                     ✏️ تعديل

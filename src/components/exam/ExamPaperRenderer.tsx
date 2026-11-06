@@ -1,5 +1,8 @@
-import React from 'react';
+'use client';
+
+import React, { useEffect, useState } from 'react';
 import { ExamPaperConfig } from '@/types/paper-config';
+import QRCode from 'qrcode';
 
 interface PaperRendererProps {
   config: ExamPaperConfig;
@@ -40,6 +43,25 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
   const mcqs = questions.filter(q => q.question_type === 'mcq');
   const tfs = questions.filter(q => q.question_type === 'true_false');
   const essays = questions.filter(q => q.question_type === 'essay');
+
+  const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
+
+  useEffect(() => {
+    if (config.qrCode?.enabled && config.qrCode.url) {
+      QRCode.toDataURL(config.qrCode.url, {
+        width: 120,
+        margin: 1,
+        color: {
+          dark: '#0f172a',
+          light: '#ffffff',
+        },
+      })
+        .then((url) => setQrCodeDataUrl(url))
+        .catch((err) => console.error('QR code generation error:', err));
+    } else {
+      setQrCodeDataUrl('');
+    }
+  }, [config.qrCode?.enabled, config.qrCode?.url]);
 
   // Page Border Class
   const borderClasses: Record<string, string> = {
@@ -421,19 +443,34 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
       </main>
 
       {/* FOOTER */}
-      <footer className="relative z-10 mt-8 pt-3 border-t-2 border-slate-900 flex items-center justify-between text-xs font-bold text-slate-600">
-        <div>
-          {config.footer.showModelName && (
-            <span>نموذج: <strong className="text-slate-900">{modelName}</strong></span>
-          )}
-        </div>
-        <div className="text-center font-black text-slate-800">
-          {config.footer.customFooterText || 'مع تمنياتنا بالتوفيق والنجاح'}
-        </div>
-        <div className="text-left">
-          {config.footer.showPageNumber && (
-            <span>ExamForge • صفحة 1</span>
-          )}
+      <footer className="relative z-10 mt-8 pt-3 border-t-2 border-slate-900">
+        {/* Optional QR Code Box in footer */}
+        {config.qrCode?.enabled && qrCodeDataUrl && (
+          <div className="mb-3 p-2 bg-slate-50 border border-slate-300 rounded-lg flex items-center justify-between gap-4">
+            <div className="text-right">
+              <span className="font-bold text-xs text-slate-800 block">🎬 {config.qrCode.title || 'فيديو الشرح ونموذج الإجابة:'}</span>
+              <span className="text-[10px] text-slate-500 font-mono truncate max-w-sm block mt-0.5">{config.qrCode.url}</span>
+            </div>
+            <div className="shrink-0 flex items-center gap-2">
+              <img src={qrCodeDataUrl} alt="QR Code" className="w-14 h-14 border border-slate-300 rounded p-0.5 bg-white" />
+            </div>
+          </div>
+        )}
+
+        <div className="flex items-center justify-between text-xs font-bold text-slate-600">
+          <div>
+            {config.footer.showModelName && (
+              <span>نموذج: <strong className="text-slate-900">{modelName}</strong></span>
+            )}
+          </div>
+          <div className="text-center font-black text-slate-800">
+            {config.footer.customFooterText || 'مع تمنياتنا بالتوفيق والنجاح'}
+          </div>
+          <div className="text-left">
+            {config.footer.showPageNumber && (
+              <span>ExamForge • صفحة 1</span>
+            )}
+          </div>
         </div>
       </footer>
     </div>

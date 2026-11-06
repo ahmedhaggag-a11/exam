@@ -57,6 +57,13 @@ export interface ExamPaperConfig {
     showModelName: boolean;
     bottomNotes?: string;
   };
+
+  // Smart QR Code
+  qrCode?: {
+    enabled: boolean;
+    url: string;
+    title: string; // e.g. "امسح الباركود لفيديو الشرح ونموذج الإجابة"
+  };
 }
 
 export const DEFAULT_PAPER_CONFIG: ExamPaperConfig = {
@@ -112,5 +119,11 @@ export const DEFAULT_PAPER_CONFIG: ExamPaperConfig = {
     showPageNumber: true,
     showModelName: true,
     bottomNotes: '',
+  },
+
+  qrCode: {
+    enabled: false,
+    url: '',
+    title: 'امسح الكود لعرض فيديو شرح وحل الامتحان',
   },
 };

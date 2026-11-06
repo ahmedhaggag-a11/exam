@@ -48,6 +48,11 @@ export default function CreateExamPage() {
   const [instructions, setInstructions] = useState('أجب عن جميع الأسئلة');
   const [totalMark, setTotalMark] = useState(100);
 
+  // Smart QR Code options
+  const [enableQrCode, setEnableQrCode] = useState(false);
+  const [qrUrl, setQrUrl] = useState('');
+  const [qrTitle, setQrTitle] = useState('امسح الكود لمشاهدة فيديو شرح وحل الامتحان');
+
   // Step 2 - Chapters & counts
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
   const [mcqCount, setMcqCount] = useState(10);
@@ -198,6 +203,26 @@ export default function CreateExamPage() {
         if (mErr) console.error('exam_models insert error:', mErr);
       }
 
+      // If QR code is enabled, save exam custom template config to Supabase Storage
+      if (enableQrCode && qrUrl.trim()) {
+        try {
+          const { getPaperTemplateConfig, savePaperTemplateConfig } = await import('@/app/admin/paper-templates/actions');
+          const currentCfg = await getPaperTemplateConfig(user.id);
+          const updatedCfg = {
+            ...currentCfg,
+            qrCode: {
+              enabled: true,
+              url: qrUrl.trim(),
+              title: qrTitle.trim() || 'امسح الكود لمشاهدة فيديو شرح وحل الامتحان',
+            },
+          };
+          // Save exam-specific template
+          await savePaperTemplateConfig(updatedCfg, `exam_${exam.id}`);
+        } catch (qrErr) {
+          console.warn('Could not save exam QR template:', qrErr);
+        }
+      }
+
       router.push('/teacher/exams');
     } catch (e: any) {
       setError(e.message || 'خطأ أثناء الحفظ');
@@ -279,6 +304,53 @@ export default function CreateExamPage() {
             <label className="block text-sm font-medium text-gray-600 mb-1">تعليمات الامتحان</label>
             <textarea value={instructions} onChange={e => setInstructions(e.target.value)} rows={3}
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-none" />
+          </div>
+
+          {/* Smart QR Code (Optional) */}
+          <div className="border-t border-slate-200 pt-4 bg-slate-50 p-4 rounded-xl space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2">
+                <span className="text-lg">🎬</span>
+                <div>
+                  <h4 className="text-sm font-bold text-slate-800">كود QR ذكي على ورقة الامتحان (Smart QR Code)</h4>
+                  <p className="text-xs text-slate-500">يتيح للطلاب مسح الكود لمشاهدة فيديو الحل على يوتيوب أو فتح تقرير نموذج الإجابة</p>
+                </div>
+              </div>
+              <label className="relative inline-flex items-center cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={enableQrCode}
+                  onChange={(e) => setEnableQrCode(e.target.checked)}
+                  className="sr-only peer"
+                />
+                <div className="w-11 h-6 bg-gray-200 peer-focus:outline-none rounded-full peer peer-checked:after:translate-x-full peer-checked:after:border-white after:content-[''] after:absolute after:top-[2px] after:right-[2px] after:bg-white after:border-gray-300 after:border after:rounded-full after:h-5 after:w-5 after:transition-all peer-checked:bg-blue-600"></div>
+              </label>
+            </div>
+
+            {enableQrCode && (
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-3 pt-2">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">رابط الفيديو أو الحل (URL) *</label>
+                  <input
+                    type="url"
+                    value={qrUrl}
+                    onChange={(e) => setQrUrl(e.target.value)}
+                    placeholder="https://youtu.be/... أو رابط الحل"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">النص التوضيحي بجوار الكود</label>
+                  <input
+                    type="text"
+                    value={qrTitle}
+                    onChange={(e) => setQrTitle(e.target.value)}
+                    placeholder="امسح الباركود لفيديو الشرح ونموذج الإجابة"
+                    className="w-full border border-gray-300 rounded-lg px-3 py-2 text-xs focus:ring-2 focus:ring-blue-500 outline-none"
+                  />
+                </div>
+              </div>
+            )}
           </div>
           <div className="flex justify-end pt-2">
             <button disabled={!canStep0} onClick={() => setStep(1)}

@@ -102,7 +102,12 @@ ${JSON.stringify(bankSummary)}
 أعد JSON فقط بهذا الشكل:
 {"selected_question_ids": ["id1", "id2", ...], "reasoning": "سبب الاختيار"}`;
 
-    const CANDIDATE_MODELS = ['gemini-2.0-flash', 'gemini-2.0-flash-lite', 'gemini-1.5-pro'];
+    const CANDIDATE_MODELS = [
+      'gemini-3.5-flash',
+      'gemini-3.5-flash-lite',
+      'gemini-3.6-flash',
+      'gemini-flash-lite-latest',
+    ];
     let text: string | undefined = undefined;
 
     for (const mName of CANDIDATE_MODELS) {

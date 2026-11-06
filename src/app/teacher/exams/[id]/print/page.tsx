@@ -80,9 +80,14 @@ export default function ExamPrintPage() {
     }
     setExam(examData as Exam);
 
-    // Fetch the customized template for this teacher or the admin global template
+    // Fetch the customized template: Check exam-specific first, then teacher, then global
     try {
-      const cfg = await getPaperTemplateConfig(examData.teacher_id);
+      let cfg = await getPaperTemplateConfig(`exam_${examData.id}`);
+      // If exam-specific has no QR or custom data, fall back to teacher config
+      if (!cfg.qrCode?.enabled && examData.teacher_id) {
+        const teacherCfg = await getPaperTemplateConfig(examData.teacher_id);
+        cfg = { ...teacherCfg, ...(cfg.qrCode?.enabled ? { qrCode: cfg.qrCode } : {}) };
+      }
       setConfig(cfg);
       setQuickColumns(cfg.columns || 1);
     } catch (e) {
