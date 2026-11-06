@@ -57,7 +57,7 @@ Return strictly a valid JSON object matching this schema:
 }
 `;
 
-      const CANDIDATE_MODELS = ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.1-flash-lite"];
+      const CANDIDATE_MODELS = ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro"];
       let rawText: string | undefined = undefined;
 
       for (const mName of CANDIDATE_MODELS) {
