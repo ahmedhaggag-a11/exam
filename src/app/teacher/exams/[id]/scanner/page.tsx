@@ -3,7 +3,20 @@
 import { useState, useEffect, useRef } from 'react';
 import { useParams } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { Camera, CheckCircle2, AlertCircle, RefreshCw, ArrowRight, UserCheck, Sparkles, Award } from 'lucide-react';
+import { processBubbleSheetImage, ScanAIResponse } from './actions';
+import {
+  Camera,
+  CheckCircle2,
+  AlertCircle,
+  RefreshCw,
+  ArrowRight,
+  Upload,
+  Sparkles,
+  Award,
+  Image as ImageIcon,
+  Check,
+  X
+} from 'lucide-react';
 import Link from 'next/link';
 
 interface QuestionAnswer {
@@ -17,6 +30,7 @@ export default function ExamScannerPage() {
 
   const videoRef = useRef<HTMLVideoElement>(null);
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   const [exam, setExam] = useState<any>(null);
   const [modelAnswers, setModelAnswers] = useState<Record<string, QuestionAnswer[]>>({});
@@ -24,16 +38,9 @@ export default function ExamScannerPage() {
   const [streamStarted, setStreamStarted] = useState(false);
   const [cameraError, setCameraError] = useState('');
   const [scanning, setScanning] = useState(false);
-  const [scanResult, setScanResult] = useState<{
-    studentName: string;
-    seatNumber: string;
-    model: string;
-    totalQuestions: number;
-    correctAnswers: number;
-    wrongAnswers: number;
-    scorePercentage: number;
-    detailedAnswers: Array<{ qNum: number; studentChoice: string; correctChoice: string; isCorrect: boolean }>;
-  } | null>(null);
+  const [capturedPreview, setCapturedPreview] = useState<string | null>(null);
+  const [scanResult, setScanResult] = useState<ScanAIResponse | null>(null);
+  const [scanError, setScanError] = useState<string | null>(null);
 
   useEffect(() => {
     loadExamData();
@@ -78,12 +85,18 @@ export default function ExamScannerPage() {
           });
         }
       });
-      setModelAnswers({ 'أ': answers });
+      setModelAnswers({
+        'أ': answers,
+        'ب': answers,
+        'ج': answers,
+        'د': answers,
+      });
     }
   }
 
   async function startCamera() {
     setCameraError('');
+    setScanError(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({
         video: {
@@ -113,66 +126,68 @@ export default function ExamScannerPage() {
     }
   }
 
-  // OMR Scanner Logic
-  async function captureAndScan() {
-    if (!videoRef.current || !canvasRef.current) return;
-    setScanning(true);
+  // Handle file upload of bubble sheet photo
+  function handleFileUpload(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
 
-    const video = videoRef.current;
-    const canvas = canvasRef.current;
-    canvas.width = video.videoWidth || 640;
-    canvas.height = video.videoHeight || 480;
+    setScanError(null);
+    setScanResult(null);
 
-    const ctx = canvas.getContext('2d');
-    if (!ctx) {
-      setScanning(false);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      const base64 = reader.result as string;
+      setCapturedPreview(base64);
+      await runRealAIScan(base64);
+    };
+    reader.readAsDataURL(file);
+  }
+
+  // Capture frame from active video stream
+  async function captureFrameAndScan() {
+    if (!streamStarted || !videoRef.current || !canvasRef.current) {
+      setScanError('الكاميرا غير مفعلة. يرجى الضغط على زر تشغيل الكاميرا أو رفع صورة الورقة.');
       return;
     }
 
-    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const video = videoRef.current;
+    const canvas = canvasRef.current;
+    canvas.width = video.videoWidth || 1280;
+    canvas.height = video.videoHeight || 720;
 
-    // Simulated Smart OMR recognition processing
-    setTimeout(() => {
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.drawImage(video, 0, 0, canvas.width, canvas.height);
+    const base64 = canvas.toDataURL('image/jpeg', 0.85);
+    setCapturedPreview(base64);
+
+    await runRealAIScan(base64);
+  }
+
+  // Run real Gemini Vision AI OMR processing
+  async function runRealAIScan(base64Data: string) {
+    setScanning(true);
+    setScanError(null);
+    setScanResult(null);
+
+    try {
       const answersForModel = modelAnswers[selectedModel] || [];
       const totalQ = answersForModel.length || exam?.total_questions || 15;
 
-      const choicesOptions = ['أ', 'ب', 'ج', 'د'];
-      let correctCount = 0;
+      const result = await processBubbleSheetImage(base64Data, totalQ, answersForModel);
 
-      const detailed = answersForModel.map((item) => {
-        // High-accuracy mock detection matching correct answers
-        const isCorrect = Math.random() > 0.18; // ~82% success rate realistic simulation
-        const studentChoice = isCorrect
-          ? item.correctCode
-          : choicesOptions[Math.floor(Math.random() * choicesOptions.length)];
-
-        if (studentChoice === item.correctCode) {
-          correctCount++;
-        }
-
-        return {
-          qNum: item.qNum,
-          studentChoice,
-          correctChoice: item.correctCode,
-          isCorrect: studentChoice === item.correctCode,
-        };
-      });
-
-      const percentage = Math.round((correctCount / (totalQ || 1)) * 100);
-
-      setScanResult({
-        studentName: 'طالب تم مسحه ضوئياً',
-        seatNumber: `${Math.floor(1000 + Math.random() * 9000)}`,
-        model: selectedModel,
-        totalQuestions: totalQ,
-        correctAnswers: correctCount,
-        wrongAnswers: totalQ - correctCount,
-        scorePercentage: percentage,
-        detailedAnswers: detailed,
-      });
-
+      if (!result.success || !result.isValidSheet) {
+        setScanError(result.error || 'لم يتم التعرف على ورقة إجابة في الكاميرا. يرجى توجيه الكاميرا جيداً نحو الورقة.');
+      } else {
+        setScanResult(result);
+      }
+    } catch (err: any) {
+      console.error('Scan error:', err);
+      setScanError(err.message || 'حدث خطأ أثناء معالجة الصورة.');
+    } finally {
       setScanning(false);
-    }, 900);
+    }
   }
 
   return (
@@ -187,8 +202,11 @@ export default function ExamScannerPage() {
             <ArrowRight className="w-5 h-5 text-slate-600" />
           </Link>
           <div>
-            <h1 className="text-xl font-black text-slate-900">
-              ماسح البابل شيت بالكاميرا (OMR Mobile Scanner)
+            <h1 className="text-xl font-black text-slate-900 flex items-center gap-2">
+              <span>ماسح البابل شيت بالذكاء الاصطناعي الحقيقي</span>
+              <span className="text-[10px] bg-blue-100 text-blue-700 px-2 py-0.5 rounded-full font-bold">
+                AI Vision
+              </span>
             </h1>
             <p className="text-xs text-slate-500 mt-0.5">
               {exam ? `${exam.title} • ${exam.subject}` : 'جاري التحميل...'}
@@ -234,7 +252,7 @@ export default function ExamScannerPage() {
         </div>
       )}
 
-      {/* Camera Live Viewfinder Box */}
+      {/* Camera Live Viewfinder & Capture Area */}
       <div className="bg-slate-950 rounded-2xl overflow-hidden shadow-2xl border-4 border-slate-900 relative min-h-[380px] flex items-center justify-center">
         <video
           ref={videoRef}
@@ -248,10 +266,10 @@ export default function ExamScannerPage() {
         {streamStarted && (
           <div className="absolute inset-8 border-2 border-dashed border-emerald-400/70 rounded-2xl pointer-events-none flex flex-col justify-between p-4">
             <div className="flex justify-between text-xs font-mono font-bold text-emerald-400 bg-slate-950/70 px-2.5 py-1 rounded w-fit">
-              <span>ضع ورقة البابل شيت داخل الإطار الأخضر</span>
+              <span>وجّه الكاميرا نحو ورقة البابل شيت</span>
             </div>
-            <div className="self-center bg-emerald-500/20 text-emerald-300 px-4 py-1 rounded-full text-xs font-bold border border-emerald-500/40 backdrop-blur-sm animate-pulse">
-              جاهز للالتقاط التلقائي 📷
+            <div className="self-center bg-emerald-500/20 text-emerald-300 px-4 py-1 rounded-full text-xs font-bold border border-emerald-500/40 backdrop-blur-sm">
+              الكاميرا نشطة - جاهز للمسح الحقيقي 📷
             </div>
           </div>
         )}
@@ -262,47 +280,107 @@ export default function ExamScannerPage() {
               <Camera className="w-8 h-8" />
             </div>
             <div>
-              <h3 className="font-bold text-white text-base">كاميرا التصحيح الذكي جاهزة</h3>
+              <h3 className="font-bold text-white text-base">كاميرا التصحيح الذكي</h3>
               <p className="text-slate-400 text-xs mt-1 max-w-sm mx-auto">
-                اضغط على الزر أدناه لفتح كاميرا الهاتف وتوجيهها نحو ورقة إجابة الطالب لرصد النتيجة في ثانية واحدة.
+                شغّل كاميرا الهاتف لتصوير ورقة الطالب مباشرة، أو ارفع صورة ملتقطة مسبقاً من ألبوم هاتفك.
               </p>
             </div>
-            <button
-              onClick={startCamera}
-              className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-600/30 transition flex items-center gap-2 mx-auto"
-            >
-              <Camera className="w-4 h-4" />
-              <span>تشغيل الكاميرا الآن</span>
-            </button>
+            <div className="flex items-center justify-center gap-3 flex-wrap">
+              <button
+                onClick={startCamera}
+                className="px-6 py-3 bg-blue-600 hover:bg-blue-500 text-white rounded-xl text-sm font-bold shadow-lg shadow-blue-600/30 transition flex items-center gap-2"
+              >
+                <Camera className="w-4 h-4" />
+                <span>تشغيل الكاميرا الآن</span>
+              </button>
+
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                className="px-5 py-3 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-sm font-bold transition flex items-center gap-2"
+              >
+                <Upload className="w-4 h-4" />
+                <span>رفع صورة ورقة إجابة</span>
+              </button>
+            </div>
           </div>
         )}
+
+        {/* Hidden File Input */}
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept="image/*"
+          className="hidden"
+          onChange={handleFileUpload}
+        />
       </div>
 
-      {/* Capture Action Button */}
-      {streamStarted && (
-        <div className="flex items-center justify-center gap-4">
+      {/* Action Buttons Bar */}
+      <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+        {streamStarted && (
           <button
-            onClick={captureAndScan}
+            onClick={captureFrameAndScan}
             disabled={scanning}
-            className="flex-1 max-w-md py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl text-base shadow-xl shadow-emerald-600/30 transition flex items-center justify-center gap-2 disabled:opacity-50"
+            className="w-full sm:w-auto flex-1 max-w-md py-4 bg-emerald-600 hover:bg-emerald-500 text-white font-black rounded-2xl text-base shadow-xl shadow-emerald-600/30 transition flex items-center justify-center gap-2 disabled:opacity-50"
           >
             {scanning ? (
               <>
                 <RefreshCw className="w-5 h-5 animate-spin" />
-                <span>جاري قراءة وتصحيح البابل شيت...</span>
+                <span>الذكاء الاصطناعي يقرأ تظليلات الورقة...</span>
               </>
             ) : (
               <>
                 <Camera className="w-5 h-5" />
-                <span>مسح الورقة وتصحيحها الآن (Scan) ⚡</span>
+                <span>التقاط وتصحيح الورقة الحقيقية بالذكاء الاصطناعي ⚡</span>
               </>
             )}
           </button>
+        )}
+
+        {streamStarted && (
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={scanning}
+            className="w-full sm:w-auto px-5 py-4 bg-white border border-slate-300 hover:bg-slate-50 text-slate-700 font-bold rounded-2xl text-sm transition flex items-center justify-center gap-2 shadow-sm"
+          >
+            <Upload className="w-4 h-4 text-slate-500" />
+            <span>أو اختر صورة من الجهاز</span>
+          </button>
+        )}
+      </div>
+
+      {/* Captured Image Preview thumbnail */}
+      {capturedPreview && (
+        <div className="bg-slate-50 border border-slate-200 rounded-2xl p-4 flex items-center gap-4">
+          <img
+            src={capturedPreview}
+            alt="الصورة الملتقطة"
+            className="w-20 h-20 object-cover rounded-xl border border-slate-300 shadow-xs"
+          />
+          <div className="flex-1 min-w-0">
+            <span className="text-xs font-bold text-slate-700 block">الصورة التي تم إرسالها للذكاء الاصطناعي:</span>
+            <span className="text-[11px] text-slate-500">
+              يقوم نموذج الرؤية البصرية (Vision AI) بفحص الدوائر المظللة بالقلم بدقة فائقة ومطابقتها بمفتاح الإجابة.
+            </span>
+          </div>
         </div>
       )}
 
-      {/* Live Scan Results Card */}
-      {scanResult && (
+      {/* Error / Not-A-Sheet Warning */}
+      {scanError && (
+        <div className="p-5 bg-amber-50 border-2 border-amber-300 rounded-2xl text-amber-900 space-y-2 animate-in fade-in">
+          <div className="flex items-center gap-2 font-black text-sm">
+            <AlertCircle className="w-5 h-5 text-amber-600 shrink-0" />
+            <span>تنبيه الماسح الضوئي:</span>
+          </div>
+          <p className="text-xs leading-relaxed text-amber-800 pr-7">
+            {scanError}
+          </p>
+        </div>
+      )}
+
+      {/* Real Live Scan Results Card */}
+      {scanResult && scanResult.isValidSheet && (
         <div className="bg-white rounded-2xl border-2 border-emerald-500 p-6 shadow-xl space-y-5 animate-in fade-in">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
             <div className="flex items-center gap-3">
@@ -310,8 +388,10 @@ export default function ExamScannerPage() {
                 <Award className="w-7 h-7" />
               </div>
               <div>
-                <h3 className="text-lg font-black text-slate-900">نتيجة التصحيح الفوري</h3>
-                <p className="text-xs text-slate-500">تم التعرف على ورقة الإجابة للنموذج ({scanResult.model}) بنجاح</p>
+                <h3 className="text-lg font-black text-slate-900">نتيجة التصحيح الحقيقية</h3>
+                <p className="text-xs text-slate-500">
+                  تم قراءة ورقة الطالب وتظليلاته بواسطة Vision AI للنموذج ({scanResult.detectedModel || selectedModel})
+                </p>
               </div>
             </div>
 
@@ -341,22 +421,27 @@ export default function ExamScannerPage() {
             </div>
           </div>
 
-          {/* Breakdown of student answers */}
+          {/* Breakdown of real student answers */}
           <div>
             <h4 className="text-xs font-bold text-slate-700 mb-2">تفاصيل تصحيح كل سؤال:</h4>
-            <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 gap-2 max-h-48 overflow-y-auto p-1">
-              {scanResult.detailedAnswers.map((item) => (
+            <div className="grid grid-cols-3 sm:grid-cols-5 md:grid-cols-6 gap-2 max-h-56 overflow-y-auto p-1">
+              {scanResult.detailedAnswers?.map((item) => (
                 <div
                   key={item.qNum}
-                  className={`p-2 rounded-lg text-xs font-bold flex flex-col items-center justify-center border ${
+                  className={`p-2.5 rounded-xl text-xs font-bold flex flex-col items-center justify-center border transition ${
                     item.isCorrect
                       ? 'bg-emerald-50 text-emerald-800 border-emerald-200'
                       : 'bg-red-50 text-red-800 border-red-200'
                   }`}
                 >
                   <span className="text-[10px] text-slate-500">س{item.qNum}</span>
-                  <span className="text-sm">
-                    {item.studentChoice} {item.isCorrect ? '✓' : `✗ (${item.correctChoice})`}
+                  <span className="text-sm mt-0.5">
+                    {item.studentChoice}{' '}
+                    {item.isCorrect ? (
+                      <Check className="w-3.5 h-3.5 inline text-emerald-600" />
+                    ) : (
+                      <span className="text-[10px] text-red-600 font-normal">({item.correctChoice})</span>
+                    )}
                   </span>
                 </div>
               ))}
