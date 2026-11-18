@@ -19,17 +19,16 @@ import {
   Sliders,
   CheckCircle2,
   QrCode,
-  Type
 } from 'lucide-react';
-import Link from 'next/link';
 
 export default function TeacherPaperTemplatePage() {
   const [config, setConfig] = useState<ExamPaperConfig>(DEFAULT_PAPER_CONFIG);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [toast, setToast] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
-  const [activeTab, setActiveTab] = useState<'header' | 'layout' | 'watermark' | 'footer'>('header');
+  const [activeTab, setActiveTab] = useState<'header' | 'layout' | 'questions' | 'watermark' | 'footer'>('header');
   const [currentUserId, setCurrentUserId] = useState<string>('');
+  const [teacherName, setTeacherName] = useState<string>('');
 
   const supabase = createClient();
 
@@ -43,20 +42,21 @@ export default function TeacherPaperTemplatePage() {
       }
       setCurrentUserId(user.id);
 
-      // Load teacher profile name if available
+      // Load teacher profile
       const { data: profile } = await supabase
         .from('profiles')
         .select('full_name, subjects')
         .eq('id', user.id)
         .single();
 
+      if (profile?.full_name) {
+        setTeacherName(profile.full_name);
+      }
+
       try {
         const savedCfg = await getPaperTemplateConfig(user.id);
         if (profile?.full_name && !savedCfg.header.teacherName) {
           savedCfg.header.teacherName = profile.full_name;
-        }
-        if (profile?.subjects?.[0] && !savedCfg.header.subjectName) {
-          savedCfg.header.subjectName = profile.subjects[0];
         }
         setConfig(savedCfg);
       } catch (err) {
@@ -98,7 +98,7 @@ export default function TeacherPaperTemplatePage() {
   // Mock exam data for live preview
   const previewExam = {
     title: 'امتحان نهاية الفصل الدراسي الأول',
-    subject: config.header.subjectName || 'الفيزياء للثانوية العامة',
+    subject: 'الفيزياء للثانوية العامة',
     grade_level: 'الصف الثالث الثانوي',
     duration_minutes: 60,
     total_marks: 60,
@@ -146,7 +146,7 @@ export default function TeacherPaperTemplatePage() {
           </div>
           <div>
             <h1 className="text-xl sm:text-2xl font-black text-slate-800">
-              استوديو تخصيص شكل ورقة الامتحان 📄🎨
+              تخصيص شكل ورقة الامتحان 📄🎨
             </h1>
             <p className="text-slate-500 text-xs mt-1">
               خصّص شكل الهيدر، اللوجو، الأعمدة، الألوان، العلامة المائية، وكود الـ QR الخاص بك لكل ورقة امتحان تطبعها.
@@ -192,10 +192,10 @@ export default function TeacherPaperTemplatePage() {
         {/* Controls Column (5 cols) */}
         <div className="lg:col-span-5 bg-white rounded-3xl border border-slate-200 shadow-sm p-6 space-y-6">
           {/* Sub Navigation Tabs */}
-          <div className="flex items-center gap-1 bg-slate-100 p-1.5 rounded-2xl text-xs font-bold">
+          <div className="flex items-center gap-1 bg-slate-100 p-1.5 rounded-2xl text-xs font-bold overflow-x-auto">
             <button
               onClick={() => setActiveTab('header')}
-              className={`flex-1 py-2 rounded-xl transition flex items-center justify-center gap-1 ${
+              className={`flex-1 py-2 px-3 rounded-xl transition flex items-center justify-center gap-1 whitespace-nowrap ${
                 activeTab === 'header'
                   ? 'bg-white text-blue-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -207,19 +207,19 @@ export default function TeacherPaperTemplatePage() {
 
             <button
               onClick={() => setActiveTab('layout')}
-              className={`flex-1 py-2 rounded-xl transition flex items-center justify-center gap-1 ${
+              className={`flex-1 py-2 px-3 rounded-xl transition flex items-center justify-center gap-1 whitespace-nowrap ${
                 activeTab === 'layout'
                   ? 'bg-white text-blue-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
               }`}
             >
               <Layout className="w-3.5 h-3.5" />
-              <span>الأعمدة والتنسيق</span>
+              <span>الأعمدة والإطار</span>
             </button>
 
             <button
               onClick={() => setActiveTab('watermark')}
-              className={`flex-1 py-2 rounded-xl transition flex items-center justify-center gap-1 ${
+              className={`flex-1 py-2 px-3 rounded-xl transition flex items-center justify-center gap-1 whitespace-nowrap ${
                 activeTab === 'watermark'
                   ? 'bg-white text-blue-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -231,7 +231,7 @@ export default function TeacherPaperTemplatePage() {
 
             <button
               onClick={() => setActiveTab('footer')}
-              className={`flex-1 py-2 rounded-xl transition flex items-center justify-center gap-1 ${
+              className={`flex-1 py-2 px-3 rounded-xl transition flex items-center justify-center gap-1 whitespace-nowrap ${
                 activeTab === 'footer'
                   ? 'bg-white text-blue-700 shadow-xs'
                   : 'text-slate-600 hover:text-slate-900'
@@ -246,36 +246,24 @@ export default function TeacherPaperTemplatePage() {
           {activeTab === 'header' && (
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">نمط الترويسة</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: 'modern', label: 'عصري (Modern)' },
-                    { id: 'classic', label: 'كلاسيكي تقليدي' },
-                    { id: 'minimal', label: 'بسيط (Minimal)' },
-                  ].map((style) => (
-                    <button
-                      key={style.id}
-                      type="button"
-                      onClick={() =>
-                        setConfig({
-                          ...config,
-                          header: { ...config.header, style: style.id as any },
-                        })
-                      }
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition ${
-                        config.header.style === style.id
-                          ? 'border-blue-600 bg-blue-50 text-blue-700 ring-2 ring-blue-500/30'
-                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      {style.label}
-                    </button>
-                  ))}
-                </div>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">نمط الترويسة العليا:</label>
+                <select
+                  value={config.headerStyle}
+                  onChange={(e) => setConfig({ ...config, headerStyle: e.target.value as any })}
+                  className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="formal">رسمي وزاري (3 أعمدة: وزارة/مدرسة - عنوان ونموذج - معلومات وزمن)</option>
+                  <option value="boxed">صندوق مؤطر (جدول منظم أنيق)</option>
+                  <option value="modern-gradient">عصري حديث (شريط ملون مع اسم السنتر)</option>
+                  <option value="standard">قياسي بسيط (أعلى الورقة مدمج)</option>
+                  <option value="minimal">مينيمال مختصر</option>
+                </select>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">اسم المعلم</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">
+                  اسم المعلم المطبوع بالورقة:
+                </label>
                 <input
                   type="text"
                   value={config.header.teacherName || ''}
@@ -285,64 +273,108 @@ export default function TeacherPaperTemplatePage() {
                       header: { ...config.header, teacherName: e.target.value },
                     })
                   }
-                  placeholder="أ. أحمد حجاج"
+                  placeholder={teacherName || 'أ. أحمد حجاج (خبير المادة)'}
                   className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">اسم المادة</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">اسم المدرسة أو السنتر:</label>
                 <input
                   type="text"
-                  value={config.header.subjectName || ''}
+                  value={config.header.schoolOrCenterName || ''}
                   onChange={(e) =>
                     setConfig({
                       ...config,
-                      header: { ...config.header, subjectName: e.target.value },
+                      header: { ...config.header, schoolOrCenterName: e.target.value },
                     })
                   }
-                  placeholder="الفيزياء للثانوية العامة"
+                  placeholder="أكاديمية المتفوقين / سنتر الأوائل"
                   className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">اسم المؤسسة / الأكاديمية / السنتر</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">السطر الأول (الدولة والوزارة):</label>
                 <input
                   type="text"
-                  value={config.header.schoolName || ''}
+                  value={config.header.ministryLine || ''}
                   onChange={(e) =>
                     setConfig({
                       ...config,
-                      header: { ...config.header, schoolName: e.target.value },
+                      header: { ...config.header, ministryLine: e.target.value },
                     })
                   }
-                  placeholder="سنتر المتفوقين أو مدرسة المتفوقين"
-                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500"
+                  className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs"
+                  placeholder="جمهورية مصر العربية - وزارة التربية والتعليم"
                 />
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">رابط صورة اللوجو (Logo URL)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">رابط صورة اللوجو (Logo URL):</label>
                 <input
                   type="url"
                   value={config.header.logoUrl || ''}
                   onChange={(e) =>
                     setConfig({
                       ...config,
-                      header: {
-                        ...config.header,
-                        logoUrl: e.target.value,
-                        showLogo: !!e.target.value,
-                      },
+                      header: { ...config.header, logoUrl: e.target.value },
                     })
                   }
                   placeholder="https://.../my-logo.png"
                   className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-mono outline-none focus:ring-2 focus:ring-blue-500"
                 />
-                <span className="text-[11px] text-slate-400 mt-1 block">
-                  يمكنك وضع رابط لوجو الأكاديمية أو صورتك الشخصية لتظهر في ترويسة الامتحان.
-                </span>
+              </div>
+
+              {/* Header Toggles */}
+              <div className="border-t pt-3 space-y-2">
+                <span className="text-xs font-bold text-slate-800 block mb-1">عناصر الترويسة الظاهرة:</span>
+                <div className="grid grid-cols-2 gap-2 text-xs">
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={config.header.showDuration}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          header: { ...config.header, showDuration: e.target.checked },
+                        })
+                      }
+                      className="rounded text-blue-600 w-4 h-4"
+                    />
+                    <span>عرض زمن الامتحان</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={config.header.showTotalMarks}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          header: { ...config.header, showTotalMarks: e.target.checked },
+                        })
+                      }
+                      className="rounded text-blue-600 w-4 h-4"
+                    />
+                    <span>عرض الدرجة الكلية</span>
+                  </label>
+
+                  <label className="flex items-center gap-2 cursor-pointer">
+                    <input
+                      type="checkbox"
+                      checked={config.header.showStudentInfoBox}
+                      onChange={(e) =>
+                        setConfig({
+                          ...config,
+                          header: { ...config.header, showStudentInfoBox: e.target.checked },
+                        })
+                      }
+                      className="rounded text-blue-600 w-4 h-4"
+                    />
+                    <span>صندوق بيانات الطالب (الاسم والجلوس)</span>
+                  </label>
+                </div>
               </div>
             </div>
           )}
@@ -351,7 +383,7 @@ export default function TeacherPaperTemplatePage() {
           {activeTab === 'layout' && (
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">تقسيم الصفحة (الأعمدة)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">تقسيم الأعمدة:</label>
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     type="button"
@@ -376,75 +408,51 @@ export default function TeacherPaperTemplatePage() {
                     }`}
                   >
                     <span className="text-sm font-black block">عمودان (صفين في الورقة) ✂️</span>
-                    <span className="text-[11px] text-slate-400">توفير 50% من الورق أثناء الطباعة بالسنتر</span>
+                    <span className="text-[11px] text-slate-400">توفير 40% إلى 50% من الورق أثناء الطباعة بالسنتر</span>
                   </button>
                 </div>
               </div>
 
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">حجم الخط الرئيسي</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: 'compact', label: 'مضغوط (صغير)' },
-                    { id: 'normal', label: 'طبيعي (معتمد)' },
-                    { id: 'large', label: 'واضح (كبير)' },
-                  ].map((size) => (
-                    <button
-                      key={size.id}
-                      type="button"
-                      onClick={() => setConfig({ ...config, fontSize: size.id as any })}
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition ${
-                        config.fontSize === size.id
-                          ? 'border-blue-600 bg-blue-50 text-blue-700'
-                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      {size.label}
-                    </button>
-                  ))}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">إطار الصفحة (Border):</label>
+                  <select
+                    value={config.pageBorder}
+                    onChange={(e) => setConfig({ ...config, pageBorder: e.target.value as any })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold"
+                  >
+                    <option value="single">إطار مفرد كلاسيكي (رسمي)</option>
+                    <option value="double">إطار مزدوج فاخر (Double)</option>
+                    <option value="rounded">إطار ذو حواف منحنية (Rounded)</option>
+                    <option value="none">بدون إطار خارجي</option>
+                  </select>
+                </div>
+
+                <div>
+                  <label className="block text-xs font-bold text-slate-700 mb-1">حجم الخط الأساسي:</label>
+                  <select
+                    value={config.fontSize}
+                    onChange={(e) => setConfig({ ...config, fontSize: e.target.value as any })}
+                    className="w-full px-3 py-2 rounded-xl border border-slate-300 text-xs font-semibold"
+                  >
+                    <option value="sm">صغير ومدمج (مكثف)</option>
+                    <option value="base">متوسط قياسي (موصى به)</option>
+                    <option value="lg">كبير وواضح للمراحل المبكرة</option>
+                  </select>
                 </div>
               </div>
 
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">إطار ورقة الامتحان</label>
-                <div className="grid grid-cols-3 gap-2">
-                  {[
-                    { id: 'single', label: 'إطار مفرد' },
-                    { id: 'double', label: 'إطار مزدوج رسمي' },
-                    { id: 'none', label: 'بدون إطار' },
-                  ].map((border) => (
-                    <button
-                      key={border.id}
-                      type="button"
-                      onClick={() =>
-                        setConfig({
-                          ...config,
-                          borderStyle: border.id as any,
-                        })
-                      }
-                      className={`py-2 px-3 rounded-xl border text-xs font-bold transition ${
-                        config.borderStyle === border.id
-                          ? 'border-blue-600 bg-blue-50 text-blue-700'
-                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
-                      }`}
-                    >
-                      {border.label}
-                    </button>
-                  ))}
-                </div>
-              </div>
-
-              <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1.5">لون العناوين والأطر</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1.5">لون العناوين والأطر الرئيسية:</label>
                 <div className="flex items-center gap-3">
                   <input
                     type="color"
-                    value={config.primaryColor || '#0f172a'}
-                    onChange={(e) => setConfig({ ...config, primaryColor: e.target.value })}
+                    value={config.themeColor || '#1e3a8a'}
+                    onChange={(e) => setConfig({ ...config, themeColor: e.target.value })}
                     className="w-10 h-10 rounded-xl cursor-pointer border border-slate-300 p-0.5"
                   />
                   <span className="text-xs font-mono text-slate-600 font-bold">
-                    {config.primaryColor || '#0f172a'}
+                    {config.themeColor || '#1e3a8a'}
                   </span>
                 </div>
               </div>
@@ -465,7 +473,7 @@ export default function TeacherPaperTemplatePage() {
                       watermark: {
                         ...config.watermark,
                         enabled: e.target.checked,
-                        text: config.watermark?.text || config.header.teacherName || 'الفيزياء',
+                        text: config.watermark?.text || teacherName || 'الفيزياء',
                         opacity: config.watermark?.opacity ?? 0.07,
                       },
                     })
@@ -477,14 +485,14 @@ export default function TeacherPaperTemplatePage() {
               {config.watermark?.enabled && (
                 <>
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">نص العلامة المائية</label>
+                    <label className="block text-xs font-bold text-slate-700 mb-1">نص العلامة المائية:</label>
                     <input
                       type="text"
                       value={config.watermark.text || ''}
                       onChange={(e) =>
                         setConfig({
                           ...config,
-                          watermark: { ...config.watermark!, text: e.target.value },
+                          watermark: { ...config.watermark, text: e.target.value },
                         })
                       }
                       placeholder="الأستاذ أحمد حجاج"
@@ -506,7 +514,7 @@ export default function TeacherPaperTemplatePage() {
                         setConfig({
                           ...config,
                           watermark: {
-                            ...config.watermark!,
+                            ...config.watermark,
                             opacity: parseFloat(e.target.value),
                           },
                         })
@@ -523,7 +531,7 @@ export default function TeacherPaperTemplatePage() {
           {activeTab === 'footer' && (
             <div className="space-y-4">
               <div>
-                <label className="block text-xs font-bold text-slate-700 mb-1">نص التذييل (الفوتر في أسفل الورقة)</label>
+                <label className="block text-xs font-bold text-slate-700 mb-1">نص التذييل (الفوتر في أسفل الورقة):</label>
                 <input
                   type="text"
                   value={config.footer?.customText || ''}
@@ -543,7 +551,7 @@ export default function TeacherPaperTemplatePage() {
                   <div>
                     <span className="text-xs font-black text-slate-800 block">كود QR الذكي الدائم على الورقة</span>
                     <span className="text-[11px] text-slate-400">
-                      يظهر مربع QR بأسفل الورقة يمسحه الطالب بالهاتف لمشاهدة فيديو الشرح أو الحل.
+                      يظهر كود QR بأسفل الورقة يمسحه الطالب بالهاتف لمشاهدة فيديو الشرح أو الحل.
                     </span>
                   </div>
                   <input
@@ -567,7 +575,7 @@ export default function TeacherPaperTemplatePage() {
                   <div className="space-y-3 pt-2 border-t border-slate-200">
                     <div>
                       <label className="block text-[11px] font-bold text-slate-600 mb-1">
-                        الرابط التلقائي (YouTube / Drive / الموقع):
+                        الرابط التلقائي (YouTube / Drive / منصة):
                       </label>
                       <input
                         type="url"
