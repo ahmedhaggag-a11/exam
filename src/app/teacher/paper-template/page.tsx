@@ -534,11 +534,11 @@ export default function TeacherPaperTemplatePage() {
                 <label className="block text-xs font-bold text-slate-700 mb-1">نص التذييل (الفوتر في أسفل الورقة):</label>
                 <input
                   type="text"
-                  value={config.footer?.customText || ''}
+                  value={config.footer?.customFooterText || ''}
                   onChange={(e) =>
                     setConfig({
                       ...config,
-                      footer: { ...config.footer, customText: e.target.value },
+                      footer: { ...config.footer, customFooterText: e.target.value },
                     })
                   }
                   placeholder="مع تمنياتنا لكم بالنجاح والتفوق • أ. أحمد حجاج"
