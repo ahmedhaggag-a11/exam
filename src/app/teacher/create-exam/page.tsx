@@ -74,22 +74,45 @@ export default function CreateExamPage() {
   async function loadSubjects() {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) return;
-    const { data } = await supabase.from('profiles').select('subjects').eq('id', user.id).single();
-    if (data?.subjects) {
+    const { data } = await supabase.from('profiles').select('subjects, grades').eq('id', user.id).single();
+    if (data?.subjects && data.subjects.length > 0) {
       setSubjects(data.subjects.map((name: string) => ({ id: name, name })));
+      // Auto select first subject so questions load immediately
+      setSubjectId((prev) => prev || data.subjects[0]);
+    }
+    if (data?.grades && data.grades.length > 0) {
+      setGrade((prev) => prev || data.grades[0]);
     }
   }
 
-  async function loadQuestions(subject: string) {
-    // Fetch questions with their choices
-    const { data, error } = await supabase
+  async function loadQuestions(subject?: string) {
+    const { data: { user } } = await supabase.auth.getUser();
+    if (!user) return;
+
+    let query = supabase
       .from('questions')
       .select('*, choices:question_choices(*)')
-      .eq('subject', subject)
+      .eq('teacher_id', user.id)
       .order('created_at', { ascending: false });
 
+    if (subject && subject.trim() !== '') {
+      query = query.eq('subject', subject);
+    }
+
+    const { data, error } = await query;
     if (error) console.error('loadQuestions error:', error);
-    setQuestions(data || []);
+
+    // Fallback: If no questions for this exact subject filter, fetch all teacher questions
+    if ((!data || data.length === 0) && subject) {
+      const { data: allTeacherQs } = await supabase
+        .from('questions')
+        .select('*, choices:question_choices(*)')
+        .eq('teacher_id', user.id)
+        .order('created_at', { ascending: false });
+      setQuestions(allTeacherQs || []);
+    } else {
+      setQuestions(data || []);
+    }
   }
 
   const availableTopics = Array.from(
@@ -405,11 +428,20 @@ export default function CreateExamPage() {
             ))}
           </div>
 
-          <div className="bg-blue-50 rounded-lg p-3 text-sm text-blue-700 flex flex-wrap gap-4">
-            <span>إجمالي المطلوب: <strong>{totalRequested}</strong> سؤال</span>
-            <span>المتاح في البنك: <strong>{pool.length}</strong> سؤال</span>
+          <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 text-xs text-blue-900 space-y-2">
+            <div className="flex flex-wrap items-center justify-between gap-2 font-bold">
+              <span>إجمالي المطلوب: <strong className="text-sm font-black text-blue-700">{totalRequested}</strong> سؤال</span>
+              <span>المتاح في البنك: <strong className="text-sm font-black text-emerald-700">{pool.length}</strong> سؤال</span>
+            </div>
+            <div className="text-[11px] text-slate-600 flex flex-wrap gap-3 pt-1 border-t border-blue-200/60">
+              <span>MCQ (اختيار من متعدد): <strong>{pool.filter(q => q.question_type === 'mcq').length}</strong></span>
+              <span>مقالي: <strong>{pool.filter(q => q.question_type === 'essay').length}</strong></span>
+              <span>صح/خطأ: <strong>{pool.filter(q => q.question_type === 'true_false').length}</strong></span>
+            </div>
             {pool.length < totalRequested && (
-              <span className="text-amber-600">⚠️ البنك أقل من المطلوب، سيتم الاختيار من المتاح فقط</span>
+              <div className="text-amber-800 bg-amber-100/70 p-2 rounded-lg font-bold">
+                ⚠️ عدد الأسئلة المطلوبة ({totalRequested}) أكبر من المتاح ({pool.length}). سيقوم الذكاء الاصطناعي باختيار المتاح بالكامل.
+              </div>
             )}
           </div>
 
