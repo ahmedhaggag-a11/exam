@@ -75,7 +75,14 @@ export default function TeacherDashboardPage() {
               className="inline-flex items-center gap-2 bg-blue-600/60 hover:bg-blue-600 border border-blue-400/40 text-white font-bold px-4 py-3 rounded-xl transition text-sm"
             >
               <FileCheck className="w-4 h-4" />
-              <span>عرض امتحاناتي المحفوظة</span>
+              <span>عرض امتحاناتي</span>
+            </Link>
+            <Link
+              href="/teacher/paper-template"
+              className="inline-flex items-center gap-2 bg-slate-900/60 hover:bg-slate-900 border border-slate-700/60 text-white font-bold px-4 py-3 rounded-xl transition text-sm"
+            >
+              <FileText className="w-4 h-4 text-amber-400" />
+              <span>تخصيص شكل ورقة الامتحان 🎨</span>
             </Link>
           </div>
         </div>

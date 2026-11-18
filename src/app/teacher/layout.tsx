@@ -12,6 +12,7 @@ import {
   FileCheck,
   LogOut,
   Sparkles,
+  Sliders,
 } from 'lucide-react';
 
 export default function TeacherLayout({
@@ -33,6 +34,7 @@ export default function TeacherLayout({
     { href: '/teacher', label: 'لوحة المعلم', icon: LayoutDashboard },
     { href: '/teacher/create-exam', label: 'إنشاء امتحان جديد (AI)', icon: PlusCircle },
     { href: '/teacher/exams', label: 'امتحاناتي المحفوظة', icon: FileCheck },
+    { href: '/teacher/paper-template', label: 'تخصيص ورقة الامتحان 📄🎨', icon: Sliders },
     { href: '/teacher/question-bank', label: 'بنك أسئلتي الخاص', icon: HelpCircle },
     { href: '/teacher/sources', label: 'كتب ومصادر المادة', icon: FileText },
   ];

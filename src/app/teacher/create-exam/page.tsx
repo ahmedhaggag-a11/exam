@@ -190,7 +190,7 @@ export default function CreateExamPage() {
         if (qErr) console.error('exam_questions insert error:', qErr);
       }
 
-      // Save each model (A, B, C, D)
+      // Save each model (A, B, C, D) with distinct question & choice orders
       for (let i = 0; i < generatedModels.length; i++) {
         const model = generatedModels[i];
         const { error: mErr } = await supabase.from('exam_models').insert({
@@ -198,7 +198,7 @@ export default function CreateExamPage() {
           model_code: ['A', 'B', 'C', 'D'][i] || `M${i + 1}`,
           model_name: ['أ', 'ب', 'ج', 'د'][i] || `نموذج ${i + 1}`,
           questions_order: model.questions.map((q: any) => q.id),
-          choices_order: {},
+          choices_order: model.choices_order || {},
         });
         if (mErr) console.error('exam_models insert error:', mErr);
       }

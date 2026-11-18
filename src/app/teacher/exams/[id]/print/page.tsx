@@ -122,14 +122,24 @@ export default function ExamPrintPage() {
 
   function getModelQuestions(model: ExamModel): Question[] {
     const result: Question[] = [];
+    const choiceLetters = ['أ', 'ب', 'ج', 'د', 'هـ', 'و'];
+
     (model.questions_order || []).forEach((qid) => {
       if (!questions[qid]) return;
       const q = { ...questions[qid] };
-      if (model.choices_order?.[qid] && q.choices) {
+      if (model.choices_order?.[qid] && q.choices && q.choices.length > 1) {
         const order = model.choices_order[qid];
-        q.choices = [...q.choices].sort((a, b) => {
-          return order.indexOf(a.choice_code) - order.indexOf(b.choice_code);
-        });
+        q.choices = [...q.choices]
+          .sort((a, b) => {
+            const idxA = order.indexOf(a.id) !== -1 ? order.indexOf(a.id) : order.indexOf(a.choice_code);
+            const idxB = order.indexOf(b.id) !== -1 ? order.indexOf(b.id) : order.indexOf(b.choice_code);
+            return idxA - idxB;
+          })
+          .map((c, idx) => ({
+            ...c,
+            choice_code: choiceLetters[idx] || c.choice_code,
+            order_index: idx,
+          }));
       } else if (q.choices) {
         q.choices = [...q.choices].sort((a, b) => a.order_index - b.order_index);
       }
