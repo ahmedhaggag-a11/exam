@@ -44,6 +44,7 @@ export default function AdminQuestionBankPage() {
   const [selectedChapter, setSelectedChapter] = useState<string>('all'); // Filter 3
   const [selectedLesson, setSelectedLesson] = useState<string>('all');   // Filter 4
   const [selectedType, setSelectedType] = useState<string>('all');      // Filter 5
+  const [selectedDifficulty, setSelectedDifficulty] = useState<string>('all'); // Filter 6: الصعوبة
 
   const supabase = createClient();
 
@@ -221,6 +222,11 @@ export default function AdminQuestionBankPage() {
         if (q.question_type !== selectedType) return false;
       }
 
+      // 7. Difficulty (الصعوبة)
+      if (selectedDifficulty !== 'all') {
+        if ((q.difficulty || 'medium') !== selectedDifficulty) return false;
+      }
+
       return true;
     });
   }, [
@@ -232,6 +238,7 @@ export default function AdminQuestionBankPage() {
     selectedChapter,
     selectedLesson,
     selectedType,
+    selectedDifficulty,
     teachersMap,
   ]);
 
@@ -243,6 +250,7 @@ export default function AdminQuestionBankPage() {
     setSelectedChapter('all');
     setSelectedLesson('all');
     setSelectedType('all');
+    setSelectedDifficulty('all');
   };
 
   const hasActiveFilters =
@@ -252,7 +260,8 @@ export default function AdminQuestionBankPage() {
     selectedSource !== 'all' ||
     selectedChapter !== 'all' ||
     selectedLesson !== 'all' ||
-    selectedType !== 'all';
+    selectedType !== 'all' ||
+    selectedDifficulty !== 'all';
 
   return (
     <div className="space-y-6">
@@ -295,8 +304,8 @@ export default function AdminQuestionBankPage() {
           />
         </div>
 
-        {/* 6 Filters Grid for Admin */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6 gap-3 pt-1">
+        {/* 7 Filters Grid for Admin */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4 xl:grid-cols-7 gap-3 pt-1">
           {/* 0. المدرس مين (أولاً في الإدارة) */}
           <div className="bg-blue-50/50 p-2 rounded-xl border border-blue-200/60">
             <label className="text-xs font-black text-blue-900 mb-1.5 flex items-center gap-1">
@@ -423,6 +432,24 @@ export default function AdminQuestionBankPage() {
               <option value="true_false">صح أو خطأ</option>
             </select>
           </div>
+
+          {/* 6. مستوى الصعوبة */}
+          <div>
+            <label className="text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1.5">
+              <Sparkles className="w-3.5 h-3.5 text-rose-600" />
+              <span>6. الصعوبة</span>
+            </label>
+            <select
+              value={selectedDifficulty}
+              onChange={(e) => setSelectedDifficulty(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              <option value="all">الكل (جميع المستويات)</option>
+              <option value="easy">🟢 سهل (Easy)</option>
+              <option value="medium">🟡 متوسط (Medium)</option>
+              <option value="hard">🔴 صعب (Hard)</option>
+            </select>
+          </div>
         </div>
       </div>
 
@@ -471,6 +498,11 @@ export default function AdminQuestionBankPage() {
                           : q.question_type === 'essay'
                           ? 'مقالي'
                           : 'صح/خطأ'}
+                      </span>
+
+                      {/* Difficulty Badge */}
+                      <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">
+                        {q.difficulty === 'easy' ? '🟢 سهل' : q.difficulty === 'hard' ? '🔴 صعب' : '🟡 متوسط'}
                       </span>
 
                       <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">

@@ -2,7 +2,18 @@
 
 import { useEffect, useState, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Filter, Search, RotateCcw, BookOpen, Layers, Bookmark, GraduationCap, HelpCircle } from 'lucide-react';
+import { 
+  Filter, 
+  Search, 
+  RotateCcw, 
+  BookOpen, 
+  Layers, 
+  Bookmark, 
+  GraduationCap, 
+  HelpCircle, 
+  Gauge, 
+  Trash2 
+} from 'lucide-react';
 import { Question } from '@/types/database';
 
 interface SourceItem {
@@ -23,6 +34,7 @@ export default function TeacherQuestionBankPage() {
   const [selectedChapter, setSelectedChapter] = useState<string>('all');
   const [selectedLesson, setSelectedLesson] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
+  const [selectedDifficulty, setSelectedDifficulty] = useState<string>('all');
 
   const supabase = createClient();
 
@@ -162,9 +174,23 @@ export default function TeacherQuestionBankPage() {
         if (q.question_type !== selectedType) return false;
       }
 
+      // 7. Difficulty (الصعوبة)
+      if (selectedDifficulty !== 'all') {
+        if ((q.difficulty || 'medium') !== selectedDifficulty) return false;
+      }
+
       return true;
     });
-  }, [questions, searchTerm, selectedGrade, selectedSource, selectedChapter, selectedLesson, selectedType]);
+  }, [
+    questions, 
+    searchTerm, 
+    selectedGrade, 
+    selectedSource, 
+    selectedChapter, 
+    selectedLesson, 
+    selectedType,
+    selectedDifficulty
+  ]);
 
   const resetFilters = () => {
     setSearchTerm('');
@@ -173,6 +199,7 @@ export default function TeacherQuestionBankPage() {
     setSelectedChapter('all');
     setSelectedLesson('all');
     setSelectedType('all');
+    setSelectedDifficulty('all');
   };
 
   const hasActiveFilters =
@@ -181,16 +208,36 @@ export default function TeacherQuestionBankPage() {
     selectedSource !== 'all' ||
     selectedChapter !== 'all' ||
     selectedLesson !== 'all' ||
-    selectedType !== 'all';
+    selectedType !== 'all' ||
+    selectedDifficulty !== 'all';
+
+  // Remove redundant text-image from question
+  async function handleRemoveImage(questionId: string) {
+    if (!confirm('هل تريد حذف هذه الصورة من السؤال؟ (مفيد إذا كانت الصورة مجرد نص مكرر)')) return;
+    try {
+      const { error } = await supabase
+        .from('questions')
+        .update({ image_urls: [] })
+        .eq('id', questionId);
+
+      if (error) throw error;
+
+      setQuestions((prev) =>
+        prev.map((q) => (q.id === questionId ? { ...q, image_urls: [] } : q))
+      );
+    } catch (err: any) {
+      alert('خطأ أثناء إزالة الصورة: ' + err.message);
+    }
+  }
 
   return (
     <div className="space-y-6">
       {/* Header */}
       <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
         <div>
-          <h1 className="text-2xl font-black text-slate-800">بنك أسئلتي المخصص</h1>
+          <h1 className="text-2xl font-black text-slate-800">بنك أسئلتي المخصص 📚</h1>
           <p className="text-slate-500 text-sm mt-1">
-            تصفح وبحث وفلترة جميع الأسئلة المسجلة في حسابك بكل سهولة.
+            تصفح وبحث وفلترة جميع الأسئلة المسجلة في حسابك بكل سهولة حسب الفصل، الدرس، الصعوبة والنوع.
           </p>
         </div>
 
@@ -205,7 +252,7 @@ export default function TeacherQuestionBankPage() {
         )}
       </div>
 
-      {/* Filter Box with 5 Dropdowns */}
+      {/* Filter Box with 6 Dropdowns */}
       <div className="bg-white p-5 rounded-2xl border border-slate-200 shadow-sm space-y-4">
         {/* Search input */}
         <div className="relative">
@@ -215,12 +262,12 @@ export default function TeacherQuestionBankPage() {
             value={searchTerm}
             onChange={(e) => setSearchTerm(e.target.value)}
             placeholder="بحث في نص السؤال أو الفصل أو الدرس..."
-            className="w-full pr-11 pl-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            className="w-full pr-11 pl-4 py-2.5 bg-slate-50 border border-slate-200 rounded-xl text-sm font-semibold focus:ring-2 focus:ring-blue-500 outline-none"
           />
         </div>
 
-        {/* 5 Filters Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-3 pt-1">
+        {/* 6 Filters Grid */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-1">
           {/* 1. السنة الدراسية */}
           <div>
             <label className="text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1.5">
@@ -265,11 +312,14 @@ export default function TeacherQuestionBankPage() {
           <div>
             <label className="text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5 text-amber-600" />
-              <span>3. الشابتر / الفصل</span>
+              <span>3. الفصل / الباب</span>
             </label>
             <select
               value={selectedChapter}
-              onChange={(e) => setSelectedChapter(e.target.value)}
+              onChange={(e) => {
+                setSelectedChapter(e.target.value);
+                setSelectedLesson('all');
+              }}
               className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none"
             >
               <option value="all">الكل (جميع الفصول)</option>
@@ -285,12 +335,13 @@ export default function TeacherQuestionBankPage() {
           <div>
             <label className="text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1.5">
               <Bookmark className="w-3.5 h-3.5 text-emerald-600" />
-              <span>4. الدرس</span>
+              <span>4. اسم الدرس</span>
             </label>
             <select
               value={selectedLesson}
               onChange={(e) => setSelectedLesson(e.target.value)}
-              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none"
+              disabled={availableLessons.length === 0}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50"
             >
               <option value="all">الكل (جميع الدروس)</option>
               {availableLessons.length > 0 ? (
@@ -322,6 +373,24 @@ export default function TeacherQuestionBankPage() {
               <option value="mcq">اختيار من متعدد (MCQ)</option>
               <option value="essay">مقالي (Essay)</option>
               <option value="true_false">صح أو خطأ</option>
+            </select>
+          </div>
+
+          {/* 6. مستوى الصعوبة (جديد) */}
+          <div>
+            <label className="text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1.5">
+              <Gauge className="w-3.5 h-3.5 text-rose-600" />
+              <span>6. مستوى الصعوبة</span>
+            </label>
+            <select
+              value={selectedDifficulty}
+              onChange={(e) => setSelectedDifficulty(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              <option value="all">الكل (جميع المستويات)</option>
+              <option value="easy">🟢 سهل (Easy)</option>
+              <option value="medium">🟡 متوسط (Medium)</option>
+              <option value="hard">🔴 صعب (Hard)</option>
             </select>
           </div>
         </div>
@@ -364,6 +433,10 @@ export default function TeacherQuestionBankPage() {
                         ? 'مقالي'
                         : 'صح/خطأ'}
                     </span>
+                    {/* Difficulty Badge */}
+                    <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-slate-100 text-slate-700">
+                      {q.difficulty === 'easy' ? '🟢 سهل' : q.difficulty === 'hard' ? '🔴 صعب' : '🟡 متوسط'}
+                    </span>
                     <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-blue-50 text-blue-700 border border-blue-200">
                       🎓 {q.grade_level || 'الصف الثالث الثانوي'}
                     </span>
@@ -389,37 +462,49 @@ export default function TeacherQuestionBankPage() {
 
                 <p className="font-bold text-slate-800 text-base leading-relaxed pr-1">{q.text}</p>
 
+                {/* Display Image if present */}
                 {q.image_urls && q.image_urls.length > 0 && (
-                  <div className="my-3">
+                  <div className="my-3 p-3 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
                     <img
                       src={q.image_urls[0]}
                       alt="صورة السؤال"
-                      className="max-w-full h-auto max-h-52 rounded-xl border border-slate-200 shadow-xs"
+                      className="max-w-full h-auto max-h-56 rounded-xl border border-slate-200 shadow-xs bg-white"
                     />
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveImage(q.id)}
+                      className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0"
+                    >
+                      <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                      <span>حذف الصورة (إن كانت نصاً مكرراً)</span>
+                    </button>
                   </div>
                 )}
 
+                {/* Choices rendering */}
                 {q.choices && q.choices.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-2">
-                    {q.choices.map((c) => (
-                      <div
-                        key={c.id || c.choice_code}
-                        className={`p-3 rounded-xl text-xs font-bold border transition ${
-                          c.is_correct
-                            ? 'bg-emerald-50 text-emerald-800 border-emerald-300 ring-1 ring-emerald-400'
-                            : 'bg-slate-50 text-slate-700 border-slate-200'
-                        }`}
-                      >
-                        <span className="ml-1 text-slate-500 font-black">({c.choice_code})</span> {c.text}
-                      </div>
-                    ))}
-                  </div>
-                )}
-
-                {q.model_answer && (
-                  <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-xs text-amber-900 mt-2">
-                    <span className="font-black">الإجابة النموذجية: </span>
-                    <span>{q.model_answer}</span>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                    {q.choices
+                      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+                      .map((c, cIdx) => (
+                        <div
+                          key={c.id || cIdx}
+                          className={`p-3 rounded-xl border text-sm flex items-center justify-between ${
+                            c.is_correct
+                              ? 'bg-emerald-50 text-emerald-900 border-emerald-300 font-bold'
+                              : 'bg-white text-slate-700 border-slate-200'
+                          }`}
+                        >
+                          <span>
+                            ({c.choice_code || ['أ', 'ب', 'ج', 'د'][cIdx]}) {c.text}
+                          </span>
+                          {c.is_correct && (
+                            <span className="text-xs bg-emerald-600 text-white px-2 py-0.5 rounded-md font-bold">
+                              ✓ صحيح
+                            </span>
+                          )}
+                        </div>
+                      ))}
                   </div>
                 )}
               </div>

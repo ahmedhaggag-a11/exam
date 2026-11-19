@@ -23,7 +23,7 @@ function bufferToBase64(buffer: ArrayBuffer): string {
 async function extractQuestionsFromPDF(
   pdfBuffer: ArrayBuffer,
   subject: string,
-  chapterName: string,
+  defaultChapterName: string,
   sourceName: string
 ): Promise<any[]> {
   const apiKey = process.env.GEMINI_API_KEY;
@@ -35,90 +35,110 @@ async function extractQuestionsFromPDF(
   const ai = new GoogleGenAI({ apiKey });
   const pdfBase64 = bufferToBase64(pdfBuffer);
 
-  const prompt = `أنت خبير تربوي متخصص في استخراج الأسئلة من الكتب المدرسية.
+  const prompt = `أنت خبير تربوي وموجّه أول متخصص في تحليل المناهج والكتب المدرسية واستخراج بنوك الأسئلة بدقة فائقة.
 
-المهمة: استخرج جميع الأسئلة الموجودة في هذا الملف.
+المهمة: استخرج جميع الأسئلة والتمارين الموجودة في هذا الملف مع تفكيك وتصنيف دقيق لكل سؤال.
 
-التعليمات الصارمة:
-1. استخرج كل سؤال بالكامل.
-2. أنواع الأسئلة: mcq (اختيار من متعدد) أو essay (مقالي) أو true_false (صح وخطأ).
-3. إذا كان السؤال اختياراً من متعدد، استخرج الإجابة الصحيحة.
-4. إذا كان السؤال يعتمد على صورة أو رسم بياني (مثل الدوائر الكهربائية، الخرائط، إلخ)، قم بتحديد إحداثيات الصورة بدقة.
-استخدم تنسيق الإحداثيات التالي: [ymin, xmin, ymax, xmax] (حيث القيم بين 0 و 1000).
-5. يجب أن تعطي رقم الصفحة التي توجد بها الصورة (رقم الصفحة يبدأ من 1).
+التعليمات الصارمة والمشددة:
+1. استخراج نص السؤال: استخرج نص السؤال كاملاً كما هو مكتوب.
+2. فصل الفصول والأبواب (chapter): استخرج اسم الفصل أو الباب الذي ينتمي إليه السؤال بدقة من ترويسة أو سياق الكتاب (مثال: "الفصل الأول: التيار الكهربي وقانون أوم"، "الباب الثاني: المغناطيسية"). إذا لم يُذكر، استخدم "${defaultChapterName || 'الفصل الأول'}".
+3. فصل أسماء الدروس (lesson): استخرج اسم الدرس أو الموضوع الفرعي المحدد بدقة (مثال: "الدرس الأول: شدة التيار وفرق الجهد"، "الدرس الثاني: المقاومة النوعية"، "قانونا كيرشوف").
+4. نوع السؤال (question_type):
+   - mcq: اختيار من متعدد
+   - essay: أسئلة مقالية، علل، ما النتائج المترتبة، مسائل حسابية
+   - true_false: صح أو خطأ
+5. مستوى الصعوبة التربوي (difficulty):
+   - easy: أسئلة التذكر والمفاهيم المباشرة البسيطة.
+   - medium: أسئلة الفهم والتطبيق الحسابي المعتاد.
+   - hard: أسئلة مستويات التفكير العليا، والمسائل المركبة، وأسئلة الفائقين.
+6. إذا كان السؤال اختياراً من متعدد (mcq)، استخرج جميع الخيارات مع كود الخيار (أ، ب، ج، د)، وحدد الخيار الصحيح بـ is_correct: true.
+
+7. ⚠️ قاعدة صارمة جداً بخصوص الصور والرسومات (has_image):
+   - إذا كان السؤال نصياً فقط (سواء كان معه خيارات أو بدون) ولا يحتوي على رسم، يُمنع منعاً باتاً استخراج أو قص صورة له! اجعل السؤال نصاً كاملاً فقط مع خياراته، وضع has_image: false و image_box: null.
+   - استخرج صورة فقط وفقط وحصراً إذا كان السؤال يحتوي على: رسم بياني، أو دائرة كهربية، أو شكل هندسي، أو خريطة، أو جهاز تجريبي، أو رسمة علمية لا يمكن فهم السؤال بدونها!
+   - في حال وجود رسمة توضيحية، حدد إحداثيات صندوق الرسمة فقط (وليس نص السؤال ولا الخيارات) بدقة [ymin, xmin, ymax, xmax] حيث القيم بين 0 و 1000. ورقم الصفحة يبدأ من 1.
 
 يجب أن يكون الناتج بصيغة JSON متوافقة مع هذا المخطط الدقيق:
 {
   "questions": [
     {
-      "text": "نص السؤال كاملاً",
+      "text": "نص السؤال كاملاً بدون قص",
+      "chapter": "اسم الفصل أو الباب بدقة",
+      "lesson": "اسم الدرس المحدد",
       "question_type": "mcq",
       "difficulty": "medium",
       "choices": [
-        {"code": "أ", "text": "نص", "is_correct": true}
+        {"code": "أ", "text": "نص الاختيار الأول", "is_correct": false},
+        {"code": "ب", "text": "نص الاختيار الثاني", "is_correct": true},
+        {"code": "ج", "text": "نص الاختيار الثالث", "is_correct": false},
+        {"code": "د", "text": "نص الاختيار الرابع", "is_correct": false}
       ],
-      "model_answer": null,
+      "model_answer": "شرح الحل النموذجي إن وجد",
       "needs_review": false,
-      "has_image": true,
-      "image_page_number": 1,
-      "image_box": [200, 300, 500, 600]
+      "has_image": false,
+      "image_page_number": null,
+      "image_box": null
     }
   ]
 }`;
 
-    const CANDIDATE_MODELS = [
-      'gemini-3.5-flash',
-      'gemini-3.5-flash-lite',
-      'gemini-3.6-flash',
-      'gemini-flash-lite-latest',
-    ];
+  const CANDIDATE_MODELS = [
+    'gemini-2.5-flash',
+    'gemini-1.5-flash',
+    'gemini-2.0-flash',
+  ];
 
-    let lastError: any = null;
-    let responseText: string | undefined = undefined;
+  let lastError: any = null;
+  let responseText: string | undefined = undefined;
 
-    for (const modelName of CANDIDATE_MODELS) {
-      for (let attempt = 0; attempt < 2; attempt++) {
-        try {
-          const result = await ai.models.generateContent({
-            model: modelName,
-            contents: [
-              {
-                role: 'user',
-                parts: [
-                  {
-                    inlineData: {
-                      data: pdfBase64,
-                      mimeType: 'application/pdf',
-                    },
+  for (const modelName of CANDIDATE_MODELS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const result = await ai.models.generateContent({
+          model: modelName,
+          contents: [
+            {
+              role: 'user',
+              parts: [
+                {
+                  inlineData: {
+                    data: pdfBase64,
+                    mimeType: 'application/pdf',
                   },
-                  { text: prompt },
-                ],
-              },
-            ],
-            config: {
-              responseMimeType: 'application/json',
+                },
+                { text: prompt },
+              ],
             },
-          });
-          if (result && result.text) {
-            responseText = result.text;
-            break;
-          }
-        } catch (err: any) {
-          lastError = err;
-          console.warn(`Gemini extraction attempt failed with model ${modelName}:`, err?.message || err);
-          await new Promise(r => setTimeout(r, 1000));
+          ],
+          config: {
+            responseMimeType: 'application/json',
+          },
+        });
+        if (result && result.text) {
+          responseText = result.text;
+          break;
         }
+      } catch (err: any) {
+        lastError = err;
+        console.warn(`Gemini extraction attempt failed with model ${modelName}:`, err?.message || err);
+        await new Promise(r => setTimeout(r, 1000));
       }
-      if (responseText) break;
     }
+    if (responseText) break;
+  }
 
-    if (!responseText) {
-      if (lastError) throw lastError;
-      return [];
-    }
-    
+  if (!responseText) {
+    if (lastError) throw lastError;
+    return [];
+  }
+  
+  try {
     const parsed = JSON.parse(responseText);
     return parsed.questions || [];
+  } catch (parseErr) {
+    console.error('Failed to parse Gemini response JSON:', parseErr);
+    return [];
+  }
 }
 
 export async function uploadPdfAndSeedBank(formData: FormData) {
@@ -135,7 +155,7 @@ export async function uploadPdfAndSeedBank(formData: FormData) {
   try {
     const fileBuffer = await file.arrayBuffer();
 
-    // 1. Upload file to Storage using admin key (bypasses RLS)
+    // 1. Upload file to Storage using admin key
     const fileExt = file.name.split('.').pop();
     const fileName = `${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${fileExt}`;
     const storagePath = `${teacherId}/${fileName}`;
@@ -172,7 +192,7 @@ export async function uploadPdfAndSeedBank(formData: FormData) {
 
     if (sourceError) throw new Error(`خطأ في حفظ بيانات المصدر: ${sourceError.message}`);
 
-    // 3. Extract questions using Gemini AI
+    // 3. Extract questions using Gemini Vision AI
     const extractedQuestions = await extractQuestionsFromPDF(
       fileBuffer,
       subject,
@@ -180,13 +200,11 @@ export async function uploadPdfAndSeedBank(formData: FormData) {
       sourceName
     );
 
-    // Return the source data and the extracted questions to the client
-    // so the client can process image cropping via PDF.js before saving
     return {
       success: true,
       sourceData: sourceData,
       questions: extractedQuestions,
-      message: 'تم استخراج الأسئلة. جاري معالجة الصور...'
+      message: 'تم استخراج الأسئلة وتصنيف الفصول والصعوبة بنجاح.'
     };
   } catch (err: any) {
     return { success: false, error: err.message || 'حدث خطأ غير متوقع' };
@@ -197,7 +215,7 @@ export async function saveQuestionsBulk(
   teacherId: string, 
   sourceId: string, 
   subject: string, 
-  chapter: string, 
+  defaultChapter: string, 
   questions: any[]
 ) {
   try {
@@ -210,7 +228,8 @@ export async function saveQuestionsBulk(
         question_type: q.question_type || 'mcq',
         difficulty: q.difficulty || 'medium',
         subject: subject,
-        chapter: chapter,
+        chapter: q.chapter || defaultChapter || 'الفصل الأول',
+        lesson: q.lesson || null,
         grade_level: 'الصف الثالث الثانوي',
         marks: q.question_type === 'essay' ? 4 : 2,
         model_answer: q.model_answer || null,
@@ -224,7 +243,10 @@ export async function saveQuestionsBulk(
         .select()
         .single();
 
-      if (qError) continue;
+      if (qError) {
+        console.error('Error inserting question:', qError);
+        continue;
+      }
 
       if (createdQ && q.choices && q.choices.length > 0) {
         const choiceRows = q.choices.map((c: any, idx: number) => ({
