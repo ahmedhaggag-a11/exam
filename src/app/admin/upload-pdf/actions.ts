@@ -83,9 +83,10 @@ async function extractQuestionsFromPDF(
 }`;
 
   const CANDIDATE_MODELS = [
+    'gemini-flash-lite-latest',
     'gemini-3.1-flash-lite',
-    'gemini-3.8-flash',
     'gemini-flash-latest',
+    'gemini-3.8-flash',
   ];
 
   let lastError: any = null;
