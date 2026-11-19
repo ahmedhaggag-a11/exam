@@ -106,6 +106,8 @@ export default function TeacherQuestionBankPage() {
     return Array.from(set);
   }, [questions, teacherGrades]);
 
+  const isChunkLabel = (s: string) => /^الجزء\s*\d+/.test(s.trim()) || /^\d+$/.test(s.trim());
+
   const availableChapters = useMemo(() => {
     let subset = questions;
     if (selectedGrade !== 'all') {
@@ -116,8 +118,8 @@ export default function TeacherQuestionBankPage() {
     }
     const chapters = subset
       .map((q) => q.chapter)
-      .filter((c): c is string => !!c && c.trim() !== '');
-    return Array.from(new Set(chapters));
+      .filter((c): c is string => !!c && c.trim() !== '' && !isChunkLabel(c));
+    return Array.from(new Set(chapters)).sort((a, b) => a.localeCompare(b, 'ar'));
   }, [questions, selectedGrade, selectedSource]);
 
   const availableLessons = useMemo(() => {

@@ -57,6 +57,7 @@ export default function CreateExamPage() {
   const [activeModel, setActiveModel] = useState(0);
   const [error, setError] = useState('');
   const [reasoning, setReasoning] = useState('');
+  const [topicSearch, setTopicSearch] = useState('');
 
   // ── Step 0
   const [title, setTitle] = useState('');
@@ -135,7 +136,15 @@ export default function CreateExamPage() {
     ? questions.filter(q => q.source_id === selectedSourceId)
     : questions;
 
-  const availableTopics = Array.from(new Set(sourceFilteredQuestions.map(q => q.chapter || q.topic).filter(Boolean) as string[]));
+  // Filter out raw chunk labels (e.g. "الجزء 58 (ص 172 - 174)") — keep only real chapter names
+  const isChunkLabel = (s: string) => /^الجزء\s*\d+/.test(s.trim()) || /^\d+$/.test(s.trim());
+  const availableTopics = Array.from(
+    new Set(
+      sourceFilteredQuestions
+        .map(q => q.chapter || q.topic)
+        .filter((t): t is string => !!t && !isChunkLabel(t))
+    )
+  ).sort((a, b) => a.localeCompare(b, 'ar'));
 
   function toggleTopic(topic: string) {
     setSelectedTopics(prev => prev.includes(topic) ? prev.filter(t => t !== topic) : [...prev, topic]);
@@ -502,14 +511,59 @@ export default function CreateExamPage() {
               <AlertCircle className="w-5 h-5 shrink-0" /><span>⚠️ لا توجد أسئلة لهذا المصدر أو المادة. يرجى اختيار مصدر آخر أو رفع أسئلة.</span>
             </div>
           ) : availableTopics.length > 0 ? (
-            <div>
-              <p className="text-xs font-bold text-slate-700 mb-2">اختر الفصول / الأبواب (اتركها فارغة لاختيار الكل):</p>
-              <div className="flex flex-wrap gap-2">
-                {availableTopics.map(topic => (
-                  <button key={topic} onClick={() => toggleTopic(topic)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition ${selectedTopics.includes(topic) ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-blue-400'}`}>{topic}</button>
-                ))}
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <p className="text-xs font-bold text-slate-700">اختر الفصول / الأبواب:</p>
+                <div className="flex items-center gap-2">
+                  {selectedTopics.length > 0 && (
+                    <button onClick={() => setSelectedTopics([])} className="text-[11px] text-red-500 hover:text-red-700 font-semibold transition">
+                      إلغاء الكل ✕
+                    </button>
+                  )}
+                  <button onClick={() => setSelectedTopics([...availableTopics])} className="text-[11px] text-blue-600 hover:text-blue-800 font-semibold transition">
+                    تحديد الكل
+                  </button>
+                </div>
               </div>
-              <p className="text-[11px] text-slate-400 mt-1.5">{selectedTopics.length === 0 ? 'سيتم السحب من جميع الفصول' : `تم اختيار ${selectedTopics.length} فصول`}</p>
+
+              {/* Search */}
+              {availableTopics.length > 6 && (
+                <div className="relative">
+                  <Search className="absolute right-3 top-1/2 -translate-y-1/2 w-3.5 h-3.5 text-slate-400" />
+                  <input
+                    value={topicSearch}
+                    onChange={e => setTopicSearch(e.target.value)}
+                    placeholder="ابحث عن فصل أو باب..."
+                    className="w-full pr-9 pl-3 py-2 text-xs font-medium border border-slate-200 rounded-xl bg-slate-50 outline-none focus:ring-2 focus:ring-blue-400"
+                  />
+                </div>
+              )}
+
+              <div className="flex flex-wrap gap-2 max-h-48 overflow-y-auto p-1">
+                {availableTopics
+                  .filter(t => !topicSearch || t.includes(topicSearch))
+                  .map(topic => (
+                    <button
+                      key={topic}
+                      onClick={() => toggleTopic(topic)}
+                      title={topic}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-semibold border transition max-w-[260px] truncate ${
+                        selectedTopics.includes(topic)
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-sm shadow-blue-400/30'
+                          : 'bg-white text-slate-700 border-slate-200 hover:border-blue-400 hover:bg-blue-50'
+                      }`}
+                    >
+                      {selectedTopics.includes(topic) && <span className="mr-1">✓</span>}
+                      {topic}
+                    </button>
+                  ))}
+              </div>
+
+              <p className="text-[11px] text-slate-400">
+                {selectedTopics.length === 0
+                  ? '📚 سيتم السحب من جميع الفصول'
+                  : `✅ تم اختيار ${selectedTopics.length} فصل — ${pool.length} سؤال متاح`}
+              </p>
             </div>
           ) : null}
 
