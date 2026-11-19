@@ -127,7 +127,11 @@ export default function AdminUploadPDFPage() {
       // 1. Send to AI
       const aiResult = await uploadPdfAndSeedBank(formData);
       if (!aiResult || !aiResult.success || !aiResult.questions) {
-        throw new Error(aiResult?.error || 'فشل استخراج الأسئلة من الملف');
+        throw new Error(aiResult?.error || 'فشل استخراج الأسئلة من الملف (لم يُرجع الخادم أي بيانات)');
+      }
+
+      if (aiResult.questions.length === 0) {
+        throw new Error('لم يتم العثور على أسئلة في هذا الملف. تأكد من أن الملف يحتوي على أسئلة واضحة.');
       }
 
       setStatusMsg({ type: 'success', text: 'تم استخراج الأسئلة بنجاح. جاري الآن قص الصور للأسئلة الرسومية...' });

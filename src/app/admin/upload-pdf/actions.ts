@@ -28,8 +28,7 @@ async function extractQuestionsFromPDF(
 ): Promise<any[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
-    console.warn('No Gemini API key, using empty extraction');
-    return [];
+    throw new Error('مفتاح Gemini API غير متوفر في إعدادات السيرفر (GEMINI_API_KEY). يرجى مراجعة المسؤول.');
   }
 
   const ai = new GoogleGenAI({ apiKey });
