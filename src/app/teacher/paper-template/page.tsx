@@ -459,71 +459,202 @@ export default function TeacherPaperTemplatePage() {
             </div>
           )}
 
-          {/* TAB 3: WATERMARK */}
+          {/* TAB 3: WATERMARK & BACKGROUND */}
           {activeTab === 'watermark' && (
-            <div className="space-y-4">
-              <div className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-200">
-                <span className="text-xs font-bold text-slate-800">تفعيل العلامة المائية في خلفية الامتحان</span>
-                <input
-                  type="checkbox"
-                  checked={config.watermark?.enabled ?? false}
-                  onChange={(e) =>
-                    setConfig({
-                      ...config,
-                      watermark: {
-                        ...config.watermark,
-                        enabled: e.target.checked,
-                        text: config.watermark?.text || teacherName || 'الفيزياء',
-                        opacity: config.watermark?.opacity ?? 0.07,
-                      },
-                    })
-                  }
-                  className="w-5 h-5 accent-blue-600 rounded cursor-pointer"
-                />
+            <div className="space-y-6">
+              {/* Background Image Upload */}
+              <div className="space-y-3 p-4 bg-slate-50 rounded-2xl border border-slate-200">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <span className="text-xs font-black text-slate-800 block">🖼️ صورة خلفية للامتحان (خاصة بك)</span>
+                    <span className="text-[11px] text-slate-400">
+                      ارفع صورة شعار أو تصميم خلفية لتظهر خفيفة في جميع صفحات الامتحان.
+                    </span>
+                  </div>
+                  <input
+                    type="checkbox"
+                    checked={config.backgroundImage?.enabled ?? false}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        backgroundImage: {
+                          enabled: e.target.checked,
+                          url: config.backgroundImage?.url || '',
+                          opacity: config.backgroundImage?.opacity ?? 0.07,
+                          size: config.backgroundImage?.size ?? 'cover',
+                        },
+                      })
+                    }
+                    className="w-5 h-5 accent-blue-600 rounded cursor-pointer"
+                  />
+                </div>
+
+                {config.backgroundImage?.enabled && (
+                  <div className="space-y-3 pt-2 border-t border-slate-200">
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1.5">اختر صورة الخلفية من جهازك:</label>
+                      <label className="flex items-center gap-2 cursor-pointer">
+                        <div className="flex-1 px-4 py-3 border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-xl bg-white text-center text-xs font-semibold text-slate-500 hover:text-blue-600 transition cursor-pointer">
+                          {config.backgroundImage?.url ? '✅ تم اختيار صورة — اضغط لتغييرها' : '📂 اضغط هنا لرفع صورة الخلفية (PNG / JPG)'}
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={(e) => {
+                              const f = e.target.files?.[0];
+                              if (!f) return;
+                              const reader = new FileReader();
+                              reader.onload = (ev) => {
+                                setConfig({
+                                  ...config,
+                                  backgroundImage: {
+                                    enabled: true,
+                                    url: ev.target?.result as string,
+                                    opacity: config.backgroundImage?.opacity ?? 0.07,
+                                    size: config.backgroundImage?.size ?? 'cover',
+                                  },
+                                });
+                              };
+                              reader.readAsDataURL(f);
+                            }}
+                          />
+                        </div>
+                        {config.backgroundImage?.url && (
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setConfig({
+                                ...config,
+                                backgroundImage: { ...config.backgroundImage!, url: '' },
+                              })
+                            }
+                            className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold rounded-xl border border-red-200 transition"
+                          >
+                            حذف
+                          </button>
+                        )}
+                      </label>
+                      {config.backgroundImage?.url && (
+                        <div className="mt-2 rounded-xl overflow-hidden border border-slate-200 max-h-24">
+                          {/* eslint-disable-next-line @next/next/no-img-element */}
+                          <img src={config.backgroundImage.url} alt="خلفية الامتحان" className="w-full object-cover max-h-24" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">
+                          الشفافية: {Math.round((config.backgroundImage?.opacity ?? 0.07) * 100)}%
+                        </label>
+                        <input
+                          type="range"
+                          min="0.02"
+                          max="0.30"
+                          step="0.01"
+                          value={config.backgroundImage?.opacity ?? 0.07}
+                          onChange={(e) =>
+                            setConfig({
+                              ...config,
+                              backgroundImage: {
+                                ...config.backgroundImage!,
+                                opacity: parseFloat(e.target.value),
+                              },
+                            })
+                          }
+                          className="w-full accent-blue-600"
+                        />
+                      </div>
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">طريقة العرض:</label>
+                        <select
+                          value={config.backgroundImage?.size ?? 'cover'}
+                          onChange={(e) =>
+                            setConfig({
+                              ...config,
+                              backgroundImage: {
+                                ...config.backgroundImage!,
+                                size: e.target.value as 'cover' | 'contain' | 'repeat',
+                              },
+                            })
+                          }
+                          className="w-full px-3 py-1.5 rounded-lg border border-slate-300 text-xs font-bold"
+                        >
+                          <option value="cover">تغطية كاملة (Cover)</option>
+                          <option value="contain">ملاءمة كاملة (Contain)</option>
+                          <option value="repeat">تكرار (Repeat)</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+                )}
               </div>
 
-              {config.watermark?.enabled && (
-                <>
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">نص العلامة المائية:</label>
-                    <input
-                      type="text"
-                      value={config.watermark.text || ''}
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          watermark: { ...config.watermark, text: e.target.value },
-                        })
-                      }
-                      placeholder="الأستاذ أحمد حجاج"
-                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500"
-                    />
-                  </div>
+              {/* Watermark Text */}
+              <div className="space-y-4">
+                <div className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-200">
+                  <span className="text-xs font-bold text-slate-800">تفعيل العلامة المائية النصية</span>
+                  <input
+                    type="checkbox"
+                    checked={config.watermark?.enabled ?? false}
+                    onChange={(e) =>
+                      setConfig({
+                        ...config,
+                        watermark: {
+                          ...config.watermark,
+                          enabled: e.target.checked,
+                          text: config.watermark?.text || teacherName || 'الفيزياء',
+                          opacity: config.watermark?.opacity ?? 0.07,
+                        },
+                      })
+                    }
+                    className="w-5 h-5 accent-blue-600 rounded cursor-pointer"
+                  />
+                </div>
 
-                  <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      درجة الشفافية: {Math.round((config.watermark.opacity || 0.07) * 100)}%
-                    </label>
-                    <input
-                      type="range"
-                      min="0.02"
-                      max="0.25"
-                      step="0.01"
-                      value={config.watermark.opacity ?? 0.07}
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          watermark: {
-                            ...config.watermark,
-                            opacity: parseFloat(e.target.value),
-                          },
-                        })
-                      }
-                      className="w-full accent-blue-600"
-                    />
-                  </div>
-                </>
-              )}
+                {config.watermark?.enabled && (
+                  <>
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">نص العلامة المائية:</label>
+                      <input
+                        type="text"
+                        value={config.watermark.text || ''}
+                        onChange={(e) =>
+                          setConfig({
+                            ...config,
+                            watermark: { ...config.watermark, text: e.target.value },
+                          })
+                        }
+                        placeholder="الأستاذ أحمد حجاج"
+                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">
+                        درجة الشفافية: {Math.round((config.watermark.opacity || 0.07) * 100)}%
+                      </label>
+                      <input
+                        type="range"
+                        min="0.02"
+                        max="0.25"
+                        step="0.01"
+                        value={config.watermark.opacity ?? 0.07}
+                        onChange={(e) =>
+                          setConfig({
+                            ...config,
+                            watermark: {
+                              ...config.watermark,
+                              opacity: parseFloat(e.target.value),
+                            },
+                          })
+                        }
+                        className="w-full accent-blue-600"
+                      />
+                    </div>
+                  </>
+                )}
+              </div>
             </div>
           )}
 

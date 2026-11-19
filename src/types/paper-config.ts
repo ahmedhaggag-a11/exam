@@ -64,6 +64,14 @@ export interface ExamPaperConfig {
     url: string;
     title: string; // e.g. "امسح الباركود لفيديو الشرح ونموذج الإجابة"
   };
+
+  // Background Image
+  backgroundImage?: {
+    enabled: boolean;
+    url: string;      // base64 data URL or remote URL
+    opacity: number;  // 0.03 to 0.25
+    size: 'cover' | 'contain' | 'repeat'; // how image fills page
+  };
 }
 
 export const DEFAULT_PAPER_CONFIG: ExamPaperConfig = {
@@ -125,5 +133,12 @@ export const DEFAULT_PAPER_CONFIG: ExamPaperConfig = {
     enabled: false,
     url: '',
     title: 'امسح الكود لعرض فيديو شرح وحل الامتحان',
+  },
+
+  backgroundImage: {
+    enabled: false,
+    url: '',
+    opacity: 0.07,
+    size: 'cover',
   },
 };

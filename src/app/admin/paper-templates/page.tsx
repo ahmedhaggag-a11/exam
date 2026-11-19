@@ -665,24 +665,145 @@ export default function AdminPaperTemplatesPage() {
 
             {/* 4. WATERMARK TAB */}
             {activeTab === 'watermark' && (
-              <div className="space-y-4">
-                <h3 className="font-bold text-slate-800 border-b pb-2 flex items-center justify-between">
-                  <span>العلامة المائية في خلفية الامتحان</span>
-                  <label className="flex items-center gap-2 text-xs font-bold text-blue-600 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={config.watermark.enabled}
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          watermark: { ...config.watermark, enabled: e.target.checked },
-                        })
-                      }
-                      className="rounded text-blue-600 w-4 h-4"
-                    />
-                    <span>تفعيل العلامة المائية</span>
-                  </label>
-                </h3>
+              <div className="space-y-6">
+
+                {/* ── Background Image Section ── */}
+                <div className="space-y-3">
+                  <h3 className="font-bold text-slate-800 border-b pb-2 flex items-center justify-between">
+                    <span>🖼️ صورة خلفية الامتحان</span>
+                    <label className="flex items-center gap-2 text-xs font-bold text-emerald-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={config.backgroundImage?.enabled ?? false}
+                        onChange={(e) =>
+                          setConfig({
+                            ...config,
+                            backgroundImage: {
+                              enabled: e.target.checked,
+                              url: config.backgroundImage?.url || '',
+                              opacity: config.backgroundImage?.opacity ?? 0.07,
+                              size: config.backgroundImage?.size ?? 'cover',
+                            },
+                          })
+                        }
+                        className="rounded text-emerald-600 w-4 h-4"
+                      />
+                      <span>تفعيل صورة الخلفية</span>
+                    </label>
+                  </h3>
+
+                  {config.backgroundImage?.enabled && (
+                    <div className="space-y-3 bg-slate-50 rounded-xl p-4 border border-slate-200">
+                      {/* Upload button */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">ارفع صورة الخلفية (PNG / JPG / SVG):</label>
+                        <label className="flex items-center gap-2 cursor-pointer">
+                          <div className="flex-1 px-4 py-3 border-2 border-dashed border-slate-300 hover:border-emerald-500 rounded-xl bg-white text-center text-xs font-semibold text-slate-500 hover:text-emerald-600 transition cursor-pointer">
+                            {config.backgroundImage.url ? '✅ تم اختيار صورة — اضغط لتغييرها' : '📂 اضغط هنا لاختيار صورة من جهازك'}
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const f = e.target.files?.[0];
+                                if (!f) return;
+                                const reader = new FileReader();
+                                reader.onload = (ev) => {
+                                  setConfig({
+                                    ...config,
+                                    backgroundImage: {
+                                      ...config.backgroundImage!,
+                                      url: ev.target?.result as string,
+                                    },
+                                  });
+                                };
+                                reader.readAsDataURL(f);
+                              }}
+                            />
+                          </div>
+                          {config.backgroundImage.url && (
+                            <button
+                              onClick={() =>
+                                setConfig({
+                                  ...config,
+                                  backgroundImage: { ...config.backgroundImage!, url: '' },
+                                })
+                              }
+                              className="px-3 py-2 bg-red-50 hover:bg-red-100 text-red-600 text-xs font-bold rounded-xl border border-red-200 transition"
+                            >
+                              حذف
+                            </button>
+                          )}
+                        </label>
+                        {config.backgroundImage.url && (
+                          <div className="mt-2 rounded-xl overflow-hidden border border-slate-200 max-h-28">
+                            {/* eslint-disable-next-line @next/next/no-img-element */}
+                            <img src={config.backgroundImage.url} alt="خلفية الامتحان" className="w-full object-cover max-h-28" />
+                          </div>
+                        )}
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">
+                            الشفافية ({Math.round((config.backgroundImage.opacity) * 100)}%):
+                          </label>
+                          <input
+                            type="range" min="0.02" max="0.35" step="0.01"
+                            value={config.backgroundImage.opacity}
+                            onChange={(e) =>
+                              setConfig({
+                                ...config,
+                                backgroundImage: { ...config.backgroundImage!, opacity: parseFloat(e.target.value) },
+                              })
+                            }
+                            className="w-full accent-emerald-600"
+                          />
+                        </div>
+                        <div>
+                          <label className="block text-xs font-bold text-slate-700 mb-1">طريقة العرض:</label>
+                          <select
+                            value={config.backgroundImage.size}
+                            onChange={(e) =>
+                              setConfig({
+                                ...config,
+                                backgroundImage: {
+                                  ...config.backgroundImage!,
+                                  size: e.target.value as 'cover' | 'contain' | 'repeat',
+                                },
+                              })
+                            }
+                            className="w-full px-3 py-2 rounded-lg border border-slate-300 text-xs font-bold"
+                          >
+                            <option value="cover">تغطية كاملة (Cover)</option>
+                            <option value="contain">ملاءمة كاملة (Contain)</option>
+                            <option value="repeat">تكرار (Repeat)</option>
+                          </select>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* ── Watermark Text Section ── */}
+                <div className="space-y-3">
+                  <h3 className="font-bold text-slate-800 border-b pb-2 flex items-center justify-between">
+                    <span>العلامة المائية النصية</span>
+                    <label className="flex items-center gap-2 text-xs font-bold text-blue-600 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={config.watermark.enabled}
+                        onChange={(e) =>
+                          setConfig({
+                            ...config,
+                            watermark: { ...config.watermark, enabled: e.target.checked },
+                          })
+                        }
+                        className="rounded text-blue-600 w-4 h-4"
+                      />
+                      <span>تفعيل العلامة المائية</span>
+                    </label>
+                  </h3>
 
                 {config.watermark.enabled && (
                   <div className="space-y-3">
@@ -753,6 +874,7 @@ export default function AdminPaperTemplatesPage() {
                     </div>
                   </div>
                 )}
+                </div>
               </div>
             )}
 
