@@ -181,6 +181,96 @@ export async function registerSourceRecord(
   }
 }
 
+// =====================================================
+// Analyze book structure (TOC) using Gemini Vision
+// =====================================================
+export async function analyzeBookStructureAction(
+  tocPagesInput: { pdfBase64?: string; imagesBase64?: string[] },
+  totalPages: number
+): Promise<{
+  success: boolean;
+  sections?: Array<{ label: string; chapter: string; lesson: string; startPage: number; endPage: number }>;
+  error?: string;
+}> {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) throw new Error('GEMINI_API_KEY missing');
+    const ai = new GoogleGenAI({ apiKey });
+
+    let parts: Array<{ inlineData: { data: string; mimeType: string } }> = [];
+    if (tocPagesInput.pdfBase64) {
+      parts = [{ inlineData: { data: tocPagesInput.pdfBase64, mimeType: 'application/pdf' } }];
+    } else if (tocPagesInput.imagesBase64 && tocPagesInput.imagesBase64.length > 0) {
+      parts = tocPagesInput.imagesBase64.map((b64) => ({ inlineData: { data: b64, mimeType: 'image/jpeg' } }));
+    } else {
+      throw new Error('لم يتم إرسال صفحات للتحليل');
+    }
+
+    const prompt = `أنت محلل محتوى خبير في الكتب المدرسية المصرية والعربية.
+
+المهمة: حلّل جدول المحتويات أو ترويسات الصفحات المُرسَلة وأعد الهيكل الكامل للكتاب.
+
+**التعليمات:**
+1. ابحث عن جدول المحتويات (فهرس المحتويات / Table of Contents) في الصفحات المُرسَلة.
+2. استخرج كل فصل (وحدة / باب) ودروسه الفرعية مع رقم بداية كل منها كما هو مكتوب في الكتاب.
+3. رقم نهاية كل قسم = رقم بداية القسم التالي - 1. آخر قسم ينتهي بالصفحة ${totalPages}.
+4. إذا لم يوجد جدول محتويات، اقرأ ترويسات الصفحات الموجودة واستنتج الهيكل.
+5. ضمّ الدروس القصيرة (أقل من 3 صفحات) مع الدرس الذي قبلها أو بعدها لتجنب الأجزاء الصغيرة جداً.
+6. كل section يجب أن يغطي على الأقل 3 صفحات وأقصاه 15 صفحة. إذا كان الفصل كبيراً جداً، قسّمه على دروسه.
+
+**الناتج المطلوب بصيغة JSON فقط:**
+{
+  "sections": [
+    {
+      "label": "الوحدة الأولى - الدرس الأول: قانون أوم",
+      "chapter": "الوحدة الأولى: الكهرباء",
+      "lesson": "الدرس الأول: قانون أوم وشدة التيار",
+      "startPage": 5,
+      "endPage": 18
+    },
+    {
+      "label": "الوحدة الأولى - الدرس الثاني: المقاومة الكهربية",
+      "chapter": "الوحدة الأولى: الكهرباء",
+      "lesson": "الدرس الثاني: المقاومة الكهربية والنوعية",
+      "startPage": 19,
+      "endPage": 34
+    }
+  ]
+}
+
+**مهم جداً:** أعد JSON فقط بدون أي نص إضافي. تأكد أن جميع الصفحات من 1 إلى ${totalPages} مغطاة بدون فجوات.`;
+
+    const CANDIDATE_MODELS = ['gemini-flash-lite-latest', 'gemini-3.1-flash-lite', 'gemini-flash-latest'];
+    let responseText: string | undefined;
+    let lastError: any;
+
+    for (const modelName of CANDIDATE_MODELS) {
+      try {
+        const result = await ai.models.generateContent({
+          model: modelName,
+          contents: [{ role: 'user', parts: [...parts, { text: prompt }] }],
+          config: { responseMimeType: 'application/json' },
+        });
+        if (result?.text) { responseText = result.text; break; }
+      } catch (err: any) {
+        lastError = err;
+        await new Promise(r => setTimeout(r, 2000));
+      }
+    }
+
+    if (!responseText) throw new Error(lastError?.message || 'فشل تحليل هيكل الكتاب');
+
+    const parsed = JSON.parse(responseText);
+    const sections = parsed.sections || [];
+    if (!sections.length) throw new Error('لم يتم اكتشاف أي فصول أو دروس في الصفحات المُرسَلة');
+
+    return { success: true, sections };
+  } catch (err: any) {
+    console.error('analyzeBookStructureAction error:', err);
+    return { success: false, error: err.message || 'تعذر تحليل هيكل الكتاب' };
+  }
+}
+
 export async function extractQuestionsFromChunkAction(
   chunkInput: string | { pdfBase64?: string; imagesBase64?: string[] },
   subject: string,

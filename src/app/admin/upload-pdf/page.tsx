@@ -11,7 +11,9 @@ import {
   Play, 
   Layers, 
   ChevronLeft,
-  Check
+  Check,
+  BookOpen,
+  Sparkles,
 } from 'lucide-react';
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
@@ -20,7 +22,8 @@ import {
   registerSourceRecord, 
   extractQuestionsFromChunkAction, 
   saveQuestionsBulk, 
-  uploadImageFromBase64 
+  uploadImageFromBase64,
+  analyzeBookStructureAction,
 } from './actions';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
@@ -40,6 +43,10 @@ interface ChunkInfo {
   status: 'pending' | 'processing' | 'completed' | 'error';
   questionsCount?: number;
   error?: string;
+  // Smart structure fields
+  label?: string;
+  chapter?: string;
+  lesson?: string;
 }
 
 export default function AdminUploadPDFPage() {
@@ -54,12 +61,16 @@ export default function AdminUploadPDFPage() {
   const [sourceRecordId, setSourceRecordId] = useState<string | null>(null);
 
   // Chunking config
-  const [chunkSize, setChunkSize] = useState<number>(5); // Default 5 pages: completely safe for huge 130MB+ scanned books
+  const [chunkSize, setChunkSize] = useState<number>(5);
   const [chunks, setChunks] = useState<ChunkInfo[]>([]);
   const [currentChunkIndex, setCurrentChunkIndex] = useState<number>(0);
   const [isProcessing, setIsProcessing] = useState(false);
-  const [autoPlay, setAutoPlay] = useState<boolean>(true); // Auto-advance to next chunk
+  const [autoPlay, setAutoPlay] = useState<boolean>(true);
   const [totalExtractedQuestions, setTotalExtractedQuestions] = useState(0);
+
+  // Smart structure analysis
+  const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [structureMode, setStructureMode] = useState<'smart' | 'fixed'>('smart');
 
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -103,15 +114,12 @@ export default function AdminUploadPDFPage() {
 
         // Auto-recommend chunk size based on file weight
         let activeChunkSize = chunkSize;
-        if (f.size > 80 * 1024 * 1024) {
-          activeChunkSize = 3;
-          setChunkSize(3);
-        } else if (f.size > 40 * 1024 * 1024) {
+        if (f.size > 40 * 1024 * 1024) {
           activeChunkSize = 3;
           setChunkSize(3);
         }
 
-        // Generate chunks
+        // Generate default fixed-size chunks (shown as fallback)
         const generatedChunks: ChunkInfo[] = [];
         let chunkIndex = 0;
         for (let i = 1; i <= pages; i += activeChunkSize) {
@@ -126,14 +134,78 @@ export default function AdminUploadPDFPage() {
         setChunks(generatedChunks);
         setCurrentChunkIndex(0);
         setTotalExtractedQuestions(0);
+        setStructureMode('fixed');
         setStatusMsg({
           type: 'success',
-          text: `تم تحميل المستند بنجاح! إجمالي الصفحات: ${pages} صفحة تم تقسيمها تلقائياً إلى ${generatedChunks.length} جزء (كل جزء ${activeChunkSize} صفحات لتفادي أي ثقل وضمان السرعة القصوى).`,
+          text: `✅ تم تحميل المستند (${pages} صفحة). اضغط "تحليل هيكل الكتاب ذكياً" ليكتشف الفصول والدروس تلقائياً، أو ابدأ بالتقسيم الثابت مباشرة.`,
         });
       } catch (err: any) {
         console.error('Error reading PDF:', err);
         setStatusMsg({ type: 'error', text: 'تعذر قراءة ملف الـ PDF. تأكد من سلامة الملف.' });
       }
+    }
+  };
+
+  // Smart structure analysis: render first pages as JPEG and ask Gemini to detect TOC
+  const handleAnalyzeStructure = async () => {
+    if (!file || totalPages === 0) return;
+    setIsAnalyzing(true);
+    setStatusMsg({ type: 'success', text: '🔍 جاري تحليل فهرس الكتاب واكتشاف الفصول والدروس ذكياً...' });
+
+    try {
+      const fullBuffer = await file.arrayBuffer();
+      const pdfJsDoc = await pdfjsLib.getDocument({ data: fullBuffer }).promise;
+
+      // Render first 15 pages (where TOC usually is) as compressed JPEGs
+      const tocPageCount = Math.min(15, totalPages);
+      const images: string[] = [];
+      for (let p = 1; p <= tocPageCount; p++) {
+        const page = await pdfJsDoc.getPage(p);
+        const viewport = page.getViewport({ scale: 1.2 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        images.push(canvas.toDataURL('image/jpeg', 0.75).split(',')[1]);
+      }
+
+      const result = await analyzeBookStructureAction(
+        { imagesBase64: images },
+        totalPages
+      );
+
+      if (!result.success || !result.sections || result.sections.length === 0) {
+        throw new Error(result.error || 'لم يتم اكتشاف أي هيكل');
+      }
+
+      // Convert sections to ChunkInfo
+      const smartChunks: ChunkInfo[] = result.sections.map((sec, idx) => ({
+        index: idx,
+        startPage: sec.startPage,
+        endPage: Math.min(sec.endPage, totalPages),
+        status: 'pending' as const,
+        label: sec.label,
+        chapter: sec.chapter,
+        lesson: sec.lesson,
+      }));
+
+      setChunks(smartChunks);
+      setCurrentChunkIndex(0);
+      setTotalExtractedQuestions(0);
+      setStructureMode('smart');
+      setStatusMsg({
+        type: 'success',
+        text: `✨ تم اكتشاف ${smartChunks.length} قسم بناءً على فصول ودروس الكتاب! راجع الهيكل أدناه ثم ابدأ الاستخراج.`,
+      });
+    } catch (err: any) {
+      console.error('Structure analysis failed:', err);
+      setStatusMsg({
+        type: 'error',
+        text: `تعذر تحليل هيكل الكتاب: ${err.message}. يمكنك الاستمرار بالتقسيم الثابت.`,
+      });
+    } finally {
+      setIsAnalyzing(false);
     }
   };
 
@@ -280,7 +352,8 @@ export default function AdminUploadPDFPage() {
       }
 
       // 3. Send lightweight chunk to Gemini Multimodal
-      const chunkLabel = `الجزء ${chunkIdx + 1} (ص ${chunk.startPage} - ${chunk.endPage})`;
+      // Use smart label (chapter/lesson) if available, else fallback to page range
+      const chunkLabel = chunk.label || `الجزء ${chunkIdx + 1} (ص ${chunk.startPage} - ${chunk.endPage})`;
       const extractRes = await extractQuestionsFromChunkAction(
         chunkPayload,
         selectedSubject,
@@ -549,6 +622,36 @@ export default function AdminUploadPDFPage() {
             )}
           </div>
         </div>
+
+        {/* Smart Analysis Button */}
+        {file && totalPages > 0 && !chunks.some(c => c.status === 'completed') && (
+          <div className="border border-violet-200 bg-violet-50 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+            <div>
+              <p className="font-bold text-violet-800 text-sm flex items-center gap-2">
+                <Sparkles className="w-4 h-4" />
+                تحليل هيكل الكتاب ذكياً (موصى به)
+              </p>
+              <p className="text-xs text-violet-600 mt-0.5">
+                Gemini يقرأ فهرس الكتاب ويكتشف الفصول والدروس تلقائياً، بدل التقسيم على عدد صفحات ثابت.
+              </p>
+              {structureMode === 'smart' && (
+                <p className="text-xs text-emerald-600 font-bold mt-1">✅ تم التحليل — الأجزاء أدناه مرتبة حسب الفصول والدروس الفعلية</p>
+              )}
+            </div>
+            <button
+              type="button"
+              disabled={isAnalyzing || isProcessing}
+              onClick={handleAnalyzeStructure}
+              className="shrink-0 flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-bold text-sm rounded-xl transition"
+            >
+              {isAnalyzing ? (
+                <><Loader2 className="w-4 h-4 animate-spin" /><span>جاري التحليل...</span></>
+              ) : (
+                <><BookOpen className="w-4 h-4" /><span>{structureMode === 'smart' ? 'إعادة التحليل' : 'تحليل الكتاب ذكياً'}</span></>
+              )}
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Auto-Chunking Execution Board */}
@@ -558,7 +661,9 @@ export default function AdminUploadPDFPage() {
             <div>
               <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
                 <Layers className="w-5 h-5 text-blue-600" />
-                <span>خطة أجزاء الكتاب ({chunks.length} جزء)</span>
+                <span>
+                  {structureMode === 'smart' ? `هيكل الكتاب (${chunks.length} قسم بالفصول والدروس)` : `خطة أجزاء الكتاب (${chunks.length} جزء)`}
+                </span>
               </h2>
               <p className="text-xs text-slate-500 mt-0.5">
                 إجمالي الأسئلة المستخرجة حتى الآن: <strong className="text-emerald-600 font-bold">{totalExtractedQuestions} سؤال</strong>
@@ -593,7 +698,10 @@ export default function AdminUploadPDFPage() {
                       <>
                         <Play className="w-4 h-4 fill-white" />
                         <span>
-                          {chunks[currentChunkIndex]?.status === 'error' ? 'إعادة محاولة' : 'ابدأ استخراج'} الجزء {currentChunkIndex + 1} (ص {chunks[currentChunkIndex]?.startPage} - {chunks[currentChunkIndex]?.endPage})
+                          {chunks[currentChunkIndex]?.status === 'error' ? 'إعادة محاولة' : 'ابدأ استخراج'}{' '}
+                          {chunks[currentChunkIndex]?.label
+                            ? chunks[currentChunkIndex].label
+                            : `الجزء ${currentChunkIndex + 1} (ص ${chunks[currentChunkIndex]?.startPage} - ${chunks[currentChunkIndex]?.endPage})`}
                         </span>
                       </>
                     )}
@@ -628,7 +736,7 @@ export default function AdminUploadPDFPage() {
           </div>
 
           {/* Chunks List */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[400px] overflow-y-auto p-1">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[500px] overflow-y-auto p-1">
             {chunks.map((c) => {
               const isCurrent = c.index === currentChunkIndex;
               return (
@@ -646,9 +754,9 @@ export default function AdminUploadPDFPage() {
                       : 'bg-slate-50 border-slate-200 text-slate-500'
                   }`}
                 >
-                  <div className="flex items-center gap-3">
+                  <div className="flex items-center gap-3 min-w-0">
                     <div
-                      className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${
+                      className={`w-7 h-7 shrink-0 rounded-lg flex items-center justify-center font-bold text-xs ${
                         c.status === 'completed'
                           ? 'bg-emerald-600 text-white'
                           : c.status === 'processing'
@@ -660,14 +768,20 @@ export default function AdminUploadPDFPage() {
                     >
                       {c.index + 1}
                     </div>
-                    <div>
-                      <span className="font-bold text-sm block">
-                        الصفحات: {c.startPage} إلى {c.endPage}
-                      </span>
+                    <div className="min-w-0">
+                      {/* Smart label: show chapter/lesson name if available */}
+                      {c.label ? (
+                        <>
+                          <span className="font-bold text-sm block truncate" title={c.label}>{c.label}</span>
+                          <span className="text-xs opacity-60 block">ص {c.startPage} – {c.endPage}</span>
+                        </>
+                      ) : (
+                        <span className="font-bold text-sm block">الصفحات: {c.startPage} إلى {c.endPage}</span>
+                      )}
                       <span className="text-xs opacity-75">
-                        {c.status === 'completed' && `تم استخراج ${c.questionsCount || 0} سؤال`}
+                        {c.status === 'completed' && `✅ تم استخراج ${c.questionsCount || 0} سؤال`}
                         {c.status === 'processing' && 'جاري التحليل واستخراج الصور...'}
-                        {c.status === 'error' && 'فشل الاستخراج، يمكنك الإعادة'}
+                        {c.status === 'error' && `❌ ${c.error || 'فشل الاستخراج'}`}
                         {c.status === 'pending' && 'في الانتظار'}
                       </span>
                     </div>
