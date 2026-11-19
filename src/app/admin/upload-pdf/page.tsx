@@ -70,7 +70,8 @@ export default function AdminUploadPDFPage() {
 
   // Smart structure analysis
   const [isAnalyzing, setIsAnalyzing] = useState(false);
-  const [structureMode, setStructureMode] = useState<'smart' | 'fixed'>('smart');
+  const [structureMode, setStructureMode] = useState<'smart' | 'fixed'>('fixed');
+  const [bookSections, setBookSections] = useState<any[]>([]);
 
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -179,24 +180,43 @@ export default function AdminUploadPDFPage() {
         throw new Error(result.error || 'لم يتم اكتشاف أي هيكل');
       }
 
-      // Convert sections to ChunkInfo
-      const smartChunks: ChunkInfo[] = result.sections.map((sec, idx) => ({
-        index: idx,
-        startPage: sec.startPage,
-        endPage: Math.min(sec.endPage, totalPages),
-        status: 'pending' as const,
-        label: sec.label,
-        chapter: sec.chapter,
-        lesson: sec.lesson,
-      }));
+      // Convert sections into safe lightweight physical chunks (3-5 pages each)
+      // Every physical chunk is mapped to its real educational Unit & Lesson!
+      setBookSections(result.sections);
 
-      setChunks(smartChunks);
+      const activeChunkSize = chunkSize > 0 ? chunkSize : 4;
+      const mappedChunks: ChunkInfo[] = [];
+      let cIdx = 0;
+      for (let i = 1; i <= totalPages; i += activeChunkSize) {
+        const start = i;
+        const end = Math.min(i + activeChunkSize - 1, totalPages);
+        const matchedSec = result.sections.find((s: any) => start >= s.startPage && start <= s.endPage)
+          || result.sections.find((s: any) => end >= s.startPage && end <= s.endPage)
+          || result.sections.find((s: any) => (start <= s.startPage && end >= s.endPage))
+          || result.sections[0];
+
+        const chName = matchedSec?.chapter || selectedSubject || 'الوحدة الأولى';
+        const lesName = matchedSec?.lesson || 'الدرس الأول';
+
+        mappedChunks.push({
+          index: cIdx,
+          startPage: start,
+          endPage: end,
+          status: 'pending',
+          chapter: chName,
+          lesson: lesName,
+          label: `${chName} › ${lesName}`,
+        });
+        cIdx++;
+      }
+
+      setChunks(mappedChunks);
       setCurrentChunkIndex(0);
       setTotalExtractedQuestions(0);
       setStructureMode('smart');
       setStatusMsg({
         type: 'success',
-        text: `✨ تم اكتشاف ${smartChunks.length} قسم بناءً على فصول ودروس الكتاب! راجع الهيكل أدناه ثم ابدأ الاستخراج.`,
+        text: `✨ تم التعرف على هيكل الكتاب بالكامل (${result.sections.length} فصل ودرس)! وتم توزيع صفحات الكتاب الـ (${totalPages}) على (${mappedChunks.length} دفعة معالجة سريعة وخفيفة كل منها ${activeChunkSize} صفحات فقط) لضمان التحميل السلس والأمان التام.`,
       });
     } catch (err: any) {
       console.error('Structure analysis failed:', err);
@@ -352,13 +372,14 @@ export default function AdminUploadPDFPage() {
       }
 
       // 3. Send lightweight chunk to Gemini Multimodal
-      // Use smart label (chapter/lesson) if available, else fallback to page range
-      const chunkLabel = chunk.label || `الجزء ${chunkIdx + 1} (ص ${chunk.startPage} - ${chunk.endPage})`;
+      const chunkLabel = chunk.label || `ص ${chunk.startPage} - ${chunk.endPage}`;
       const extractRes = await extractQuestionsFromChunkAction(
         chunkPayload,
         selectedSubject,
         sourceName || file.name,
-        chunkLabel
+        chunkLabel,
+        chunk.chapter,
+        chunk.lesson
       );
 
       if (!extractRes || extractRes.success === false) {
@@ -577,11 +598,23 @@ export default function AdminUploadPDFPage() {
                   const gen: ChunkInfo[] = [];
                   let idx = 0;
                   for (let i = 1; i <= totalPages; i += newSize) {
+                    const start = i;
+                    const end = Math.min(i + newSize - 1, totalPages);
+                    const matchedSec = bookSections.length > 0 
+                      ? (bookSections.find((s: any) => start >= s.startPage && start <= s.endPage) || bookSections[0])
+                      : null;
+
+                    const chName = matchedSec?.chapter || selectedSubject || 'الوحدة الأولى';
+                    const lesName = matchedSec?.lesson || 'الدرس الأول';
+
                     gen.push({
                       index: idx,
-                      startPage: i,
-                      endPage: Math.min(i + newSize - 1, totalPages),
+                      startPage: start,
+                      endPage: end,
                       status: 'pending',
+                      chapter: chName,
+                      lesson: lesName,
+                      label: matchedSec ? `${chName} › ${lesName}` : `ص ${start} - ${end}`,
                     });
                     idx++;
                   }
@@ -625,31 +658,50 @@ export default function AdminUploadPDFPage() {
 
         {/* Smart Analysis Button */}
         {file && totalPages > 0 && !chunks.some(c => c.status === 'completed') && (
-          <div className="border border-violet-200 bg-violet-50 rounded-2xl p-4 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-            <div>
-              <p className="font-bold text-violet-800 text-sm flex items-center gap-2">
-                <Sparkles className="w-4 h-4" />
-                تحليل هيكل الكتاب ذكياً (موصى به)
-              </p>
-              <p className="text-xs text-violet-600 mt-0.5">
-                Gemini يقرأ فهرس الكتاب ويكتشف الفصول والدروس تلقائياً، بدل التقسيم على عدد صفحات ثابت.
-              </p>
-              {structureMode === 'smart' && (
-                <p className="text-xs text-emerald-600 font-bold mt-1">✅ تم التحليل — الأجزاء أدناه مرتبة حسب الفصول والدروس الفعلية</p>
-              )}
+          <div className="border border-violet-200 bg-violet-50 rounded-2xl p-4 space-y-3">
+            <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+              <div>
+                <p className="font-bold text-violet-800 text-sm flex items-center gap-2">
+                  <Sparkles className="w-4 h-4" />
+                  تحليل هيكل الكتاب ذكياً (موصى به)
+                </p>
+                <p className="text-xs text-violet-600 mt-0.5">
+                  Gemini يقرأ فهرس الكتاب ويكتشف الفصول والدروس تلقائياً، مع تقسيم المعالجة لقطع خفيفة وسريعة لتفادي أي ثقل.
+                </p>
+                {structureMode === 'smart' && (
+                  <p className="text-xs text-emerald-600 font-bold mt-1">
+                    ✅ تم التحليل بنجاح — تم ربط كل دفعة معالجة بوحدتها ودرسها الحقيقي
+                  </p>
+                )}
+              </div>
+              <button
+                type="button"
+                disabled={isAnalyzing || isProcessing}
+                onClick={handleAnalyzeStructure}
+                className="shrink-0 flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-bold text-sm rounded-xl transition"
+              >
+                {isAnalyzing ? (
+                  <><Loader2 className="w-4 h-4 animate-spin" /><span>جاري التحليل...</span></>
+                ) : (
+                  <><BookOpen className="w-4 h-4" /><span>{structureMode === 'smart' ? 'إعادة تحليل الفهرس' : 'تحليل هيكل الكتاب ذكياً'}</span></>
+                )}
+              </button>
             </div>
-            <button
-              type="button"
-              disabled={isAnalyzing || isProcessing}
-              onClick={handleAnalyzeStructure}
-              className="shrink-0 flex items-center gap-2 px-5 py-2.5 bg-violet-600 hover:bg-violet-700 disabled:opacity-50 text-white font-bold text-sm rounded-xl transition"
-            >
-              {isAnalyzing ? (
-                <><Loader2 className="w-4 h-4 animate-spin" /><span>جاري التحليل...</span></>
-              ) : (
-                <><BookOpen className="w-4 h-4" /><span>{structureMode === 'smart' ? 'إعادة التحليل' : 'تحليل الكتاب ذكياً'}</span></>
-              )}
-            </button>
+
+            {bookSections.length > 0 && (
+              <div className="pt-3 border-t border-violet-200/70">
+                <span className="text-xs font-bold text-violet-900 block mb-1.5">
+                  📚 الفصول والدروس المكتشفة ({bookSections.length} وحدة ودرس):
+                </span>
+                <div className="flex flex-wrap gap-1.5 max-h-32 overflow-y-auto pr-1">
+                  {bookSections.map((sec, i) => (
+                    <span key={i} className="bg-white border border-violet-200 px-2.5 py-1 rounded-lg text-xs text-violet-800 font-semibold shadow-2xs">
+                      {sec.chapter} › {sec.lesson} <span className="opacity-60 text-[10px]">(ص {sec.startPage}-{sec.endPage})</span>
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>

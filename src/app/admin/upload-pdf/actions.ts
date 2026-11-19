@@ -24,7 +24,9 @@ async function extractQuestionsMultimodal(
   parts: Array<{ inlineData: { data: string; mimeType: string } }>,
   subject: string,
   defaultChapterName: string,
-  sourceName: string
+  sourceName: string,
+  targetChapter?: string,
+  targetLesson?: string
 ): Promise<any[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -33,15 +35,30 @@ async function extractQuestionsMultimodal(
 
   const ai = new GoogleGenAI({ apiKey });
 
+  // Sanitize default chapter/lesson to ensure NO "الجزء" or page numbers ever leak in
+  const isGenericOrChunk = (str?: string) => !str || str.includes('الجزء') || /ص\s*\d+/.test(str);
+  const chapterContext = !isGenericOrChunk(targetChapter) 
+    ? targetChapter! 
+    : (!isGenericOrChunk(defaultChapterName) ? defaultChapterName : (subject || 'الفصل الأول'));
+  const lessonContext = !isGenericOrChunk(targetLesson) ? targetLesson! : 'الدرس الأول';
+
   const prompt = `أنت خبير تربوي وموجّه أول متخصص في تحليل المناهج والكتب المدرسية واستخراج بنوك الأسئلة بدقة فائقة.
 
 المهمة: استخرج جميع الأسئلة والتمارين والتدريبات الموجودة في هذا الجزء مع تفكيك وتصنيف دقيق لكل سؤال.
 ملاحظة هامة: قد يحتوي الملف على صفحات شرح ونظري ومقدمات؛ تجاهل صفحات الشرح تماماً ولا تستخرج منها أي نص، وركّز فقط وحصراً على استخراج الأسئلة الفعلية والتدريبات واختبارات الفصول ونماذج الامتحانات إن وجدت. وإذا لم تجد أي أسئلة في هذا الجزء، أرجع قائمة أسئلة فارغة [] بكل بساطة دون أي خطأ.
 
+السياق الدراسي والمنهجي المحدد لهذا الجزء من الكتاب:
+- الفصل / الوحدة الرئيسية: "${chapterContext}"
+- الدرس / الموضوع الفرعي: "${lessonContext}"
+
 التعليمات الصارمة والمشددة:
-1. استخراج نص السؤال: استخرج نص السؤال كاملاً كما هو مكتوب.
-2. فصل الفصول والأبواب (chapter): استخرج اسم الفصل أو الباب الذي ينتمي إليه السؤال بدقة من ترويسة أو سياق الكتاب (مثال: "الفصل الأول: التيار الكهربي وقانون أوم"، "الباب الثاني: المغناطيسية"). إذا لم يُذكر، استخدم "${defaultChapterName || 'الفصل الأول'}".
-3. فصل أسماء الدروس (lesson): استخرج اسم الدرس أو الموضوع الفرعي المحدد بدقة (مثال: "الدرس الأول: شدة التيار وفرق الجهد"، "الدرس الثاني: المقاومة النوعية"، "قانونا كيرشوف").
+1. استخراج نص السؤال: استخرج نص السؤال كاملاً كما هو مكتوب في الكتاب دون اختصار.
+2. ⚠️ تصنيف الفصل (chapter):
+   - يجب أن يكون اسم الفصل هو: "${chapterContext}" (أو اسم الوحدة/الباب الحقيقي من ترويسة الصفحة).
+   - 🚫 ممنوع منعاً باتاً وقاطعاً وضع (الجزء X) أو (ص X-Y) أو أي إشارة لأرقام الأجزاء أو أرقام الصفحات كاسم فصل! يجب أن يكون اسماً تعليمياً حقيقياً يظهر في بنك الأسئلة.
+3. ⚠️ تصنيف الدرس (lesson):
+   - يجب أن يكون اسم الدرس هو: "${lessonContext}" أو الموضوع العلمي المحدد الدقيق المذكور في ترويسة الدرس.
+   - 🚫 ممنوع منعاً باتاً تسمية الدرس برقم الجزء أو أرقام الصفحات.
 4. نوع السؤال (question_type):
    - mcq: اختيار من متعدد
    - essay: أسئلة مقالية، علل، ما النتائج المترتبة، مسائل حسابية
@@ -62,8 +79,8 @@ async function extractQuestionsMultimodal(
   "questions": [
     {
       "text": "نص السؤال كاملاً بدون قص",
-      "chapter": "اسم الفصل أو الباب بدقة",
-      "lesson": "اسم الدرس المحدد",
+      "chapter": "${chapterContext}",
+      "lesson": "${lessonContext}",
       "question_type": "mcq",
       "difficulty": "medium",
       "choices": [
@@ -129,22 +146,36 @@ async function extractQuestionsMultimodal(
   }
   
   try {
-    const parsed = JSON.parse(responseText);
-    const qs = parsed.questions || [];
-    if (qs.length === 0) {
-      console.warn('Gemini returned empty questions array. Raw response:', responseText.substring(0, 300));
+    let qs: any[] = [];
+    try {
+      const parsed = JSON.parse(responseText);
+      qs = parsed.questions || [];
+    } catch (parseErr) {
+      const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/) || responseText.match(/```\s*([\s\S]*?)\s*```/);
+      if (jsonMatch) {
+        const fallbackParsed = JSON.parse(jsonMatch[1]);
+        qs = fallbackParsed.questions || [];
+      } else {
+        throw parseErr;
+      }
     }
+
+    // Strict Sanitization: Guarantee NO technical chunk index ever becomes a chapter/lesson name
+    for (const q of qs) {
+      if (!q.chapter || q.chapter.includes('الجزء') || /ص\s*\d+/.test(q.chapter)) {
+        q.chapter = chapterContext;
+      }
+      if (q.lesson && (q.lesson.includes('الجزء') || /ص\s*\d+/.test(q.lesson))) {
+        q.lesson = lessonContext;
+      }
+      if (!q.lesson) {
+        q.lesson = lessonContext;
+      }
+    }
+
     return qs;
   } catch (parseErr: any) {
     console.error('Failed to parse Gemini response JSON:', parseErr, responseText.substring(0, 500));
-    // Try to extract JSON between backticks if model wrapped in markdown
-    const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/) || responseText.match(/```\s*([\s\S]*?)\s*```/);
-    if (jsonMatch) {
-      try {
-        const fallbackParsed = JSON.parse(jsonMatch[1]);
-        return fallbackParsed.questions || [];
-      } catch (e2) {}
-    }
     throw new Error(`تعذر قراءة إجابة الذكاء الاصطناعي: ${parseErr.message}`);
   }
 }
@@ -275,7 +306,9 @@ export async function extractQuestionsFromChunkAction(
   chunkInput: string | { pdfBase64?: string; imagesBase64?: string[] },
   subject: string,
   sourceName: string,
-  chunkLabel: string
+  chunkLabel: string,
+  targetChapter?: string,
+  targetLesson?: string
 ) {
   try {
     let parts: Array<{ inlineData: { data: string; mimeType: string } }> = [];
@@ -299,7 +332,9 @@ export async function extractQuestionsFromChunkAction(
       parts,
       subject,
       chunkLabel,
-      sourceName
+      sourceName,
+      targetChapter,
+      targetLesson
     );
 
     return {
@@ -406,6 +441,15 @@ export async function saveQuestionsBulk(
   try {
     let insertedCount = 0;
     for (const q of questions) {
+      let cleanChapter = q.chapter || 'عام';
+      if (cleanChapter.includes('الجزء') || /ص\s*\d+/.test(cleanChapter)) {
+        cleanChapter = subject || 'الفصل الأول';
+      }
+      let cleanLesson = q.lesson || null;
+      if (cleanLesson && (cleanLesson.includes('الجزء') || /ص\s*\d+/.test(cleanLesson))) {
+        cleanLesson = null;
+      }
+
       const questionRow = {
         teacher_id: teacherId,
         source_id: sourceId,
@@ -413,8 +457,8 @@ export async function saveQuestionsBulk(
         question_type: q.question_type || 'mcq',
         difficulty: q.difficulty || 'medium',
         subject: subject,
-        chapter: q.chapter || 'عام',
-        lesson: q.lesson || null,
+        chapter: cleanChapter,
+        lesson: cleanLesson,
         grade_level: gradeLevel || 'الصف الثالث الثانوي',
         term: term || 'الترم الأول',
         marks: q.question_type === 'essay' ? 4 : 2,
