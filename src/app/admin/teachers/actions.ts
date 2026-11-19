@@ -54,3 +54,33 @@ export async function createTeacherAccount(data: {
     return { success: false, error: error.message };
   }
 }
+
+export async function updateTeacherAccount(data: {
+  id: string;
+  fullName: string;
+  subjects: string[];
+  grades: string[];
+  password?: string;
+}) {
+  try {
+    if (data.password && data.password.trim().length >= 6) {
+      await supabaseAdmin.auth.admin.updateUserById(data.id, {
+        password: data.password.trim(),
+        user_metadata: { full_name: data.fullName }
+      });
+    }
+
+    const { error: profileError } = await supabaseAdmin.from('profiles').update({
+      full_name: data.fullName,
+      subjects: data.subjects,
+      grades: data.grades,
+      updated_at: new Date().toISOString()
+    }).eq('id', data.id);
+
+    if (profileError) throw profileError;
+
+    return { success: true };
+  } catch (error: any) {
+    return { success: false, error: error.message };
+  }
+}
