@@ -239,11 +239,11 @@ export default function AdminUploadPDFPage() {
         chunkLabel
       );
 
-      if (!extractRes || !extractRes.success || !extractRes.questions) {
-        throw new Error(extractRes?.error || 'فشل استخراج أسئلة هذا الجزء من السيرفر');
+      if (!extractRes || extractRes.success === false) {
+        throw new Error(extractRes?.error || 'تعذر معالجة الجزء على السيرفر');
       }
 
-      const extractedQs = extractRes.questions;
+      const extractedQs = Array.isArray(extractRes.questions) ? extractRes.questions : [];
 
       // 4. Crop images if any
       const questionsWithImages = extractedQs.filter(

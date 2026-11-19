@@ -210,12 +210,14 @@ export async function extractQuestionsFromChunkAction(
 
     return {
       success: true,
-      questions: extractedQuestions,
+      questions: extractedQuestions || [],
     };
   } catch (err: any) {
+    console.error('extractQuestionsFromChunkAction error:', err);
     return {
       success: false,
       error: err.message || 'حدث خطأ أثناء معالجة الجزء',
+      questions: [],
     };
   }
 }
