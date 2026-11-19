@@ -54,7 +54,7 @@ export default function AdminUploadPDFPage() {
   const [sourceRecordId, setSourceRecordId] = useState<string | null>(null);
 
   // Chunking config
-  const CHUNK_SIZE = 15; // 15 pages per chunk for highest accuracy and fast execution
+  const [chunkSize, setChunkSize] = useState<number>(5); // Default 5 pages: completely safe for huge 130MB+ scanned books
   const [chunks, setChunks] = useState<ChunkInfo[]>([]);
   const [currentChunkIndex, setCurrentChunkIndex] = useState<number>(0);
   const [isProcessing, setIsProcessing] = useState(false);
@@ -103,11 +103,11 @@ export default function AdminUploadPDFPage() {
         // Generate chunks
         const generatedChunks: ChunkInfo[] = [];
         let chunkIndex = 0;
-        for (let i = 1; i <= pages; i += CHUNK_SIZE) {
+        for (let i = 1; i <= pages; i += chunkSize) {
           generatedChunks.push({
             index: chunkIndex,
             startPage: i,
-            endPage: Math.min(i + CHUNK_SIZE - 1, pages),
+            endPage: Math.min(i + chunkSize - 1, pages),
             status: 'pending',
           });
           chunkIndex++;
@@ -117,7 +117,7 @@ export default function AdminUploadPDFPage() {
         setTotalExtractedQuestions(0);
         setStatusMsg({
           type: 'success',
-          text: `تم تحميل المستند بنجاح! إجمالي الصفحات: ${pages} صفحة تم تقسيمها تلقائياً إلى ${generatedChunks.length} جزء (كل جزء ${CHUNK_SIZE} صفحة).`,
+          text: `تم تحميل المستند بنجاح! إجمالي الصفحات: ${pages} صفحة تم تقسيمها تلقائياً إلى ${generatedChunks.length} جزء (كل جزء ${chunkSize} صفحات لضمان الأمان والسرعة للكتب الثقيلة).`,
         });
       } catch (err: any) {
         console.error('Error reading PDF:', err);
@@ -412,16 +412,53 @@ export default function AdminUploadPDFPage() {
           </div>
         </div>
 
-        <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-1.5">عنوان المصدر / اسم الكتاب</label>
-          <input
-            type="text"
-            disabled={isProcessing}
-            value={sourceName}
-            onChange={(e) => setSourceName(e.target.value)}
-            placeholder="مثال: كتاب التفوق فيزياء 2026"
-            className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-          />
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5">عنوان المصدر / اسم الكتاب</label>
+            <input
+              type="text"
+              disabled={isProcessing}
+              value={sourceName}
+              onChange={(e) => setSourceName(e.target.value)}
+              placeholder="مثال: كتاب التفوق فيزياء 2026"
+              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5">
+              حجم الجزء بالصفحات (للكتب الثقيلة والمصورة عالية الدقة)
+            </label>
+            <select
+              disabled={isProcessing || chunks.some(c => c.status === 'completed')}
+              value={chunkSize}
+              onChange={(e) => {
+                const newSize = parseInt(e.target.value, 10);
+                setChunkSize(newSize);
+                if (totalPages > 0) {
+                  const gen: ChunkInfo[] = [];
+                  let idx = 0;
+                  for (let i = 1; i <= totalPages; i += newSize) {
+                    gen.push({
+                      index: idx,
+                      startPage: i,
+                      endPage: Math.min(i + newSize - 1, totalPages),
+                      status: 'pending',
+                    });
+                    idx++;
+                  }
+                  setChunks(gen);
+                  setCurrentChunkIndex(0);
+                }
+              }}
+              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              <option value={3}>3 صفحات (أقصى أمان للكتب الممسوحة ضوئياً بجودة فائقة 100MB+)</option>
+              <option value={5}>5 صفحات (موصى به لكتب الشرح والمذكرات الكبيرة)</option>
+              <option value={10}>10 صفحات (للكتب العادية والصغيرة)</option>
+              <option value={15}>15 صفحة (للمذكرات الخفيفة والنصوص الرقمية)</option>
+            </select>
+          </div>
         </div>
 
         {/* File Picker */}
