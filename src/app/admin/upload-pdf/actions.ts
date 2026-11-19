@@ -128,16 +128,28 @@ async function extractQuestionsFromPDF(
   }
 
   if (!responseText) {
-    if (lastError) throw lastError;
-    return [];
+    if (lastError) throw new Error(`خطأ في معالجة الذكاء الاصطناعي: ${lastError.message || lastError}`);
+    throw new Error('لم يتم استرجاع أي نص من الذكاء الاصطناعي');
   }
   
   try {
     const parsed = JSON.parse(responseText);
-    return parsed.questions || [];
-  } catch (parseErr) {
-    console.error('Failed to parse Gemini response JSON:', parseErr);
-    return [];
+    const qs = parsed.questions || [];
+    if (qs.length === 0) {
+      console.warn('Gemini returned empty questions array. Raw response:', responseText.substring(0, 300));
+    }
+    return qs;
+  } catch (parseErr: any) {
+    console.error('Failed to parse Gemini response JSON:', parseErr, responseText.substring(0, 500));
+    // Try to extract JSON between backticks if model wrapped in markdown
+    const jsonMatch = responseText.match(/```json\s*([\s\S]*?)\s*```/) || responseText.match(/```\s*([\s\S]*?)\s*```/);
+    if (jsonMatch) {
+      try {
+        const fallbackParsed = JSON.parse(jsonMatch[1]);
+        return fallbackParsed.questions || [];
+      } catch (e2) {}
+    }
+    throw new Error(`تعذر قراءة إجابة الذكاء الاصطناعي: ${parseErr.message}`);
   }
 }
 
@@ -200,6 +212,13 @@ export async function uploadPdfAndSeedBank(formData: FormData) {
       '',
       sourceName
     );
+
+    if (!extractedQuestions || extractedQuestions.length === 0) {
+      return {
+        success: false,
+        error: 'لم يتم العثور على أي أسئلة داخل هذا الملف أو أن محتوى الـ PDF غير واضح للذكاء الاصطناعي.',
+      };
+    }
 
     return {
       success: true,
