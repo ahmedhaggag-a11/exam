@@ -152,6 +152,71 @@ async function extractQuestionsFromPDF(
   }
 }
 
+export async function registerSourceRecord(
+  teacherId: string,
+  sourceName: string,
+  fileName: string,
+  fileSize: number,
+  subject: string,
+  gradeLevel: string
+) {
+  try {
+    const { data: sourceData, error: sourceError } = await supabaseAdmin
+      .from('sources')
+      .insert({
+        teacher_id: teacherId,
+        name: sourceName || fileName,
+        original_filename: fileName,
+        storage_path: `registered/${Date.now()}_${fileName}`,
+        file_url: 'https://supabase.co',
+        subject: subject,
+        grade_level: gradeLevel,
+        file_size: fileSize,
+        status: 'processing',
+      })
+      .select()
+      .single();
+
+    if (sourceError) throw new Error(sourceError.message);
+    return { success: true, sourceData };
+  } catch (err: any) {
+    return { success: false, error: err.message };
+  }
+}
+
+export async function extractQuestionsFromChunkAction(
+  chunkBufferBase64: string,
+  subject: string,
+  sourceName: string,
+  chunkLabel: string
+) {
+  try {
+    const binary = atob(chunkBufferBase64);
+    const bytes = new Uint8Array(binary.length);
+    for (let i = 0; i < binary.length; i++) {
+      bytes[i] = binary.charCodeAt(i);
+    }
+    const buffer = bytes.buffer;
+
+    const extractedQuestions = await extractQuestionsFromPDF(
+      buffer,
+      subject,
+      chunkLabel,
+      sourceName
+    );
+
+    return {
+      success: true,
+      questions: extractedQuestions,
+    };
+  } catch (err: any) {
+    return {
+      success: false,
+      error: err.message || 'حدث خطأ أثناء معالجة الجزء',
+    };
+  }
+}
+
 export async function uploadPdfAndSeedBank(formData: FormData) {
   const file = formData.get('file') as File;
   const teacherId = formData.get('teacherId') as string;

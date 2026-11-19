@@ -2,10 +2,26 @@
 
 import { useEffect, useState } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { Upload, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
+import { 
+  Upload, 
+  CheckCircle, 
+  AlertCircle, 
+  Loader2, 
+  FileText, 
+  Play, 
+  Layers, 
+  ChevronLeft,
+  Check
+} from 'lucide-react';
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
-import { uploadPdfAndSeedBank, saveQuestionsBulk, uploadImageFromBase64 } from './actions';
+import { PDFDocument } from 'pdf-lib';
+import { 
+  registerSourceRecord, 
+  extractQuestionsFromChunkAction, 
+  saveQuestionsBulk, 
+  uploadImageFromBase64 
+} from './actions';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
@@ -17,6 +33,15 @@ interface TeacherProfile {
   grades: string[];
 }
 
+interface ChunkInfo {
+  index: number;
+  startPage: number;
+  endPage: number;
+  status: 'pending' | 'processing' | 'completed' | 'error';
+  questionsCount?: number;
+  error?: string;
+}
+
 export default function AdminUploadPDFPage() {
   const [teachers, setTeachers] = useState<TeacherProfile[]>([]);
   const [selectedTeacherId, setSelectedTeacherId] = useState('');
@@ -25,7 +50,16 @@ export default function AdminUploadPDFPage() {
   const [selectedTerm, setSelectedTerm] = useState('الترم الأول');
   const [sourceName, setSourceName] = useState('');
   const [file, setFile] = useState<File | null>(null);
-  const [uploading, setUploading] = useState(false);
+  const [totalPages, setTotalPages] = useState<number>(0);
+  const [sourceRecordId, setSourceRecordId] = useState<string | null>(null);
+
+  // Chunking config
+  const CHUNK_SIZE = 15; // 15 pages per chunk for highest accuracy and fast execution
+  const [chunks, setChunks] = useState<ChunkInfo[]>([]);
+  const [currentChunkIndex, setCurrentChunkIndex] = useState<number>(0);
+  const [isProcessing, setIsProcessing] = useState(false);
+  const [totalExtractedQuestions, setTotalExtractedQuestions] = useState(0);
+
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const supabase = createClient();
@@ -50,12 +84,44 @@ export default function AdminUploadPDFPage() {
     loadTeachers();
   }, [supabase]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+  // Handle PDF file selection & inspect page count
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files[0]) {
       const f = e.target.files[0];
       setFile(f);
       if (!sourceName) {
         setSourceName(f.name.replace(/\.[^/.]+$/, ''));
+      }
+
+      try {
+        setStatusMsg({ type: 'success', text: 'جاري فحص صفحات المستند...' });
+        const arrayBuffer = await f.arrayBuffer();
+        const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const pages = pdfDoc.numPages;
+        setTotalPages(pages);
+
+        // Generate chunks
+        const generatedChunks: ChunkInfo[] = [];
+        let chunkIndex = 0;
+        for (let i = 1; i <= pages; i += CHUNK_SIZE) {
+          generatedChunks.push({
+            index: chunkIndex,
+            startPage: i,
+            endPage: Math.min(i + CHUNK_SIZE - 1, pages),
+            status: 'pending',
+          });
+          chunkIndex++;
+        }
+        setChunks(generatedChunks);
+        setCurrentChunkIndex(0);
+        setTotalExtractedQuestions(0);
+        setStatusMsg({
+          type: 'success',
+          text: `تم تحميل المستند بنجاح! إجمالي الصفحات: ${pages} صفحة تم تقسيمها تلقائياً إلى ${generatedChunks.length} جزء (كل جزء ${CHUNK_SIZE} صفحة).`,
+        });
+      } catch (err: any) {
+        console.error('Error reading PDF:', err);
+        setStatusMsg({ type: 'error', text: 'تعذر قراءة ملف الـ PDF. تأكد من سلامة الملف.' });
       }
     }
   };
@@ -63,7 +129,7 @@ export default function AdminUploadPDFPage() {
   const cropImageFromPdf = async (pdfDoc: any, pageNumber: number, box: number[]): Promise<string | null> => {
     try {
       const page = await pdfDoc.getPage(pageNumber);
-      const scale = 2.0; // Render at higher resolution
+      const scale = 2.0;
       const viewport = page.getViewport({ scale });
       
       const canvas = document.createElement('canvas');
@@ -75,15 +141,12 @@ export default function AdminUploadPDFPage() {
 
       await page.render({ canvasContext: context, viewport }).promise;
 
-      // box is [ymin, xmin, ymax, xmax] scaled 0 to 1000
       const [ymin, xmin, ymax, xmax] = box;
-      
       const cropX = (xmin / 1000) * canvas.width;
       const cropY = (ymin / 1000) * canvas.height;
       const cropW = ((xmax - xmin) / 1000) * canvas.width;
       const cropH = ((ymax - ymin) / 1000) * canvas.height;
 
-      // Add padding to crop
       const padding = 10;
       const finalX = Math.max(0, cropX - padding);
       const finalY = Math.max(0, cropY - padding);
@@ -108,50 +171,94 @@ export default function AdminUploadPDFPage() {
     }
   };
 
-  const handleUploadAndProcess = async (e: React.FormEvent) => {
-    e.preventDefault();
+  // Process a specific chunk
+  const processChunk = async (chunkIdx: number) => {
     if (!file || !selectedTeacherId) return;
+    const chunk = chunks[chunkIdx];
+    if (!chunk) return;
 
-    setUploading(true);
-    setStatusMsg({ type: 'success', text: 'يتم الآن تحليل الـ PDF بواسطة الذكاء الاصطناعي (قد يستغرق دقائق)...' });
+    setIsProcessing(true);
+    setStatusMsg({
+      type: 'success',
+      text: `جاري استخراج الأسئلة من الجزء رقم (${chunkIdx + 1}/${chunks.length}) [الصفحات من ${chunk.startPage} إلى ${chunk.endPage}]...`,
+    });
+
+    // Update chunk status to processing
+    setChunks((prev) =>
+      prev.map((c, i) => (i === chunkIdx ? { ...c, status: 'processing' } : c))
+    );
 
     try {
-      const formData = new FormData();
-      formData.append('file', file);
-      formData.append('teacherId', selectedTeacherId);
-      formData.append('subject', selectedSubject);
-      formData.append('gradeLevel', selectedGrade);
-      formData.append('term', selectedTerm);
-      formData.append('sourceName', sourceName || file.name);
-
-      // 1. Send to AI
-      const aiResult = await uploadPdfAndSeedBank(formData);
-      if (!aiResult || !aiResult.success || !aiResult.questions) {
-        throw new Error(aiResult?.error || 'فشل استخراج الأسئلة من الملف (لم يُرجع الخادم أي بيانات)');
+      // 1. Ensure source record exists
+      let activeSourceId = sourceRecordId;
+      if (!activeSourceId) {
+        const srcRes = await registerSourceRecord(
+          selectedTeacherId,
+          sourceName || file.name,
+          file.name,
+          file.size,
+          selectedSubject,
+          selectedGrade
+        );
+        if (!srcRes.success || !srcRes.sourceData) {
+          throw new Error(srcRes.error || 'تعذر إنشاء سجل للمصدر');
+        }
+        activeSourceId = srcRes.sourceData.id;
+        setSourceRecordId(activeSourceId);
       }
 
-      if (aiResult.questions.length === 0) {
-        throw new Error('لم يتم العثور على أسئلة في هذا الملف. تأكد من أن الملف يحتوي على أسئلة واضحة.');
+      // 2. Slice pages using pdf-lib in browser
+      const fullBuffer = await file.arrayBuffer();
+      const originalPdfDoc = await PDFDocument.load(fullBuffer);
+      const subPdfDoc = await PDFDocument.create();
+
+      // Zero-based page indices
+      const pageIndices: number[] = [];
+      for (let p = chunk.startPage - 1; p < chunk.endPage; p++) {
+        pageIndices.push(p);
       }
 
-      setStatusMsg({ type: 'success', text: 'تم استخراج الأسئلة بنجاح. جاري الآن قص الصور للأسئلة الرسومية...' });
+      const copiedPages = await subPdfDoc.copyPages(originalPdfDoc, pageIndices);
+      copiedPages.forEach((page) => subPdfDoc.addPage(page));
 
-      // 2. Process images if any question has a bounding box
-      const questionsWithImages = aiResult.questions.filter((q: any) => q.has_image && q.image_page_number && q.image_box);
+      const chunkPdfBytes = await subPdfDoc.save();
       
-      if (questionsWithImages.length > 0) {
-        const fileBuffer = await file.arrayBuffer();
-        const pdfDoc = await pdfjsLib.getDocument({ data: fileBuffer }).promise;
+      // Convert chunk bytes to base64
+      let binary = '';
+      for (let i = 0; i < chunkPdfBytes.byteLength; i++) {
+        binary += String.fromCharCode(chunkPdfBytes[i]);
+      }
+      const chunkBase64 = btoa(binary);
 
-        for (let i = 0; i < aiResult.questions.length; i++) {
-          const q = aiResult.questions[i];
+      // 3. Send lightweight chunk to Gemini
+      const chunkLabel = `الجزء ${chunkIdx + 1} (ص ${chunk.startPage} - ${chunk.endPage})`;
+      const extractRes = await extractQuestionsFromChunkAction(
+        chunkBase64,
+        selectedSubject,
+        sourceName || file.name,
+        chunkLabel
+      );
+
+      if (!extractRes.success || !extractRes.questions) {
+        throw new Error(extractRes.error || 'فشل استخراج أسئلة هذا الجزء');
+      }
+
+      const extractedQs = extractRes.questions;
+
+      // 4. Crop images if any
+      const questionsWithImages = extractedQs.filter(
+        (q: any) => q.has_image && q.image_page_number && q.image_box
+      );
+
+      if (questionsWithImages.length > 0) {
+        const pdfJsDoc = await pdfjsLib.getDocument({ data: fullBuffer }).promise;
+        for (let i = 0; i < extractedQs.length; i++) {
+          const q = extractedQs[i];
           if (q.has_image && q.image_page_number && q.image_box) {
-            setStatusMsg({ type: 'success', text: `جاري قص صورة السؤال رقم ${i + 1}...` });
-            
-            // Validate page number
-            const pageNum = Math.min(Math.max(1, q.image_page_number), pdfDoc.numPages);
-            
-            const base64Img = await cropImageFromPdf(pdfDoc, pageNum, q.image_box);
+            // Absolute page number in the original book
+            const absPageNum = chunk.startPage + (q.image_page_number - 1);
+            const pageNum = Math.min(Math.max(1, absPageNum), pdfJsDoc.numPages);
+            const base64Img = await cropImageFromPdf(pdfJsDoc, pageNum, q.image_box);
             if (base64Img) {
               const url = await uploadImageFromBase64(base64Img, selectedTeacherId);
               if (url) q.final_image_url = url;
@@ -160,45 +267,57 @@ export default function AdminUploadPDFPage() {
         }
       }
 
-      setStatusMsg({ type: 'success', text: 'جاري الحفظ في بنك الأسئلة...' });
+      // 5. Save chunk questions to DB
+      if (extractedQs.length > 0) {
+        const saveRes = await saveQuestionsBulk(
+          selectedTeacherId,
+          activeSourceId!,
+          selectedSubject,
+          selectedGrade,
+          selectedTerm,
+          extractedQs
+        );
+        if (!saveRes.success) throw new Error(saveRes.error);
+      }
 
-      // 3. Save to DB
-      const saveResult = await saveQuestionsBulk(
-        selectedTeacherId,
-        aiResult.sourceData?.id || '',
-        selectedSubject,
-        selectedGrade,
-        selectedTerm,
-        aiResult.questions
+      // Update chunk state
+      setChunks((prev) =>
+        prev.map((c, i) =>
+          i === chunkIdx
+            ? { ...c, status: 'completed', questionsCount: extractedQs.length }
+            : c
+        )
       );
 
-      if (!saveResult || !saveResult.success) {
-        throw new Error(saveResult?.error || 'فشل حفظ الأسئلة في قاعدة البيانات');
-      }
+      setTotalExtractedQuestions((prev) => prev + extractedQs.length);
+      setCurrentChunkIndex(chunkIdx + 1);
 
       setStatusMsg({
         type: 'success',
-        text: `تم رفع الملف بنجاح وحفظ ${saveResult.count} سؤال في بنك الأسئلة (مرفق بها الصور)!`,
+        text: `تم بنجاح الانتهاء من استخراج وحفظ الجزء (${chunkIdx + 1}) بواقع ${extractedQs.length} سؤال! جاهز لبدء الجزء التالي.`,
       });
-      setFile(null);
-      setSourceName('');
     } catch (err: any) {
       console.error(err);
+      setChunks((prev) =>
+        prev.map((c, i) => (i === chunkIdx ? { ...c, status: 'error', error: err.message } : c))
+      );
       setStatusMsg({
         type: 'error',
-        text: err.message || 'حدث خطأ أثناء معالجة المستند.',
+        text: `حدث خطأ في الجزء (${chunkIdx + 1}): ${err.message}`,
       });
     } finally {
-      setUploading(false);
+      setIsProcessing(false);
     }
   };
 
   return (
-    <div className="max-w-3xl mx-auto space-y-6">
+    <div className="max-w-4xl mx-auto space-y-6 pb-12">
       <div>
-        <h1 className="text-2xl font-bold text-slate-800">رفع كتاب PDF وتغذية بنك المعلم (نظام الصور الآلي)</h1>
+        <h1 className="text-2xl font-bold text-slate-800">
+          رفع الكتب والمذكرات الكبيرة واستخراج بنك الأسئلة بالتقسيم الآلي
+        </h1>
         <p className="text-slate-500 text-sm mt-1">
-          سيقوم النظام بقراءة الـ PDF، استخراج الأسئلة، واستخراج وقص الرسوم البيانية والصور وربطها بالأسئلة تلقائياً.
+          يدعم الكتب حتى 300+ صفحة؛ يتم تقسيم الكتاب تلقائياً إلى أجزاء ومعالجتها جزءاً تلو الآخر بدقة تامة.
         </p>
       </div>
 
@@ -206,12 +325,14 @@ export default function AdminUploadPDFPage() {
         <div
           className={`p-4 rounded-xl text-sm font-semibold flex items-center gap-3 ${
             statusMsg.type === 'success'
-              ? uploading ? 'bg-blue-100 text-blue-800 border border-blue-300' : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
+              ? isProcessing 
+                ? 'bg-blue-100 text-blue-800 border border-blue-300' 
+                : 'bg-emerald-100 text-emerald-800 border border-emerald-300'
               : 'bg-red-100 text-red-800 border border-red-300'
           }`}
         >
           {statusMsg.type === 'success' ? (
-             uploading ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" /> : <CheckCircle className="w-5 h-5 shrink-0" />
+             isProcessing ? <Loader2 className="w-5 h-5 shrink-0 animate-spin" /> : <CheckCircle className="w-5 h-5 shrink-0" />
           ) : (
             <AlertCircle className="w-5 h-5 shrink-0" />
           )}
@@ -219,20 +340,18 @@ export default function AdminUploadPDFPage() {
         </div>
       )}
 
-      <form onSubmit={handleUploadAndProcess} className="bg-white p-8 rounded-2xl border border-slate-200 shadow-sm space-y-6">
+      {/* Basic Settings */}
+      <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
         <div>
           <label className="block text-xs font-semibold text-slate-700 mb-1.5">اختر المعلم المستهدف</label>
           <select
+            disabled={isProcessing || chunks.some(c => c.status === 'completed')}
             value={selectedTeacherId}
             onChange={(e) => {
               setSelectedTeacherId(e.target.value);
               const t = teachers.find((x) => x.id === e.target.value);
-              if (t && t.subjects && t.subjects.length > 0) {
-                setSelectedSubject(t.subjects[0]);
-              }
-              if (t && t.grades && t.grades.length > 0) {
-                setSelectedGrade(t.grades[0]);
-              }
+              if (t && t.subjects && t.subjects.length > 0) setSelectedSubject(t.subjects[0]);
+              if (t && t.grades && t.grades.length > 0) setSelectedGrade(t.grades[0]);
             }}
             className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
           >
@@ -249,25 +368,24 @@ export default function AdminUploadPDFPage() {
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">المادة الدراسية</label>
             <input
               type="text"
+              disabled={isProcessing}
               value={selectedSubject}
               onChange={(e) => setSelectedSubject(e.target.value)}
               className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
             />
           </div>
 
-          {/* السنة الدراسية - تُسحب من صلاحيات المعلم */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">السنة الدراسية</label>
             <select
+              disabled={isProcessing}
               value={selectedGrade}
               onChange={(e) => setSelectedGrade(e.target.value)}
               className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
             >
-              {/* From teacher profile grades */}
               {(teachers.find(t => t.id === selectedTeacherId)?.grades || []).map((g) => (
                 <option key={g} value={g}>{g}</option>
               ))}
-              {/* Fallback if teacher has no grades */}
               {(teachers.find(t => t.id === selectedTeacherId)?.grades || []).length === 0 && (
                 <>
                   <option value="الصف الأول الثانوي">الصف الأول الثانوي</option>
@@ -278,10 +396,10 @@ export default function AdminUploadPDFPage() {
             </select>
           </div>
 
-          {/* الترم */}
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">الترم الدراسي</label>
             <select
+              disabled={isProcessing}
               value={selectedTerm}
               onChange={(e) => setSelectedTerm(e.target.value)}
               className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
@@ -296,50 +414,161 @@ export default function AdminUploadPDFPage() {
           <label className="block text-xs font-semibold text-slate-700 mb-1.5">عنوان المصدر / اسم الكتاب</label>
           <input
             type="text"
+            disabled={isProcessing}
             value={sourceName}
             onChange={(e) => setSourceName(e.target.value)}
-            placeholder="كتاب الوافي فيزياء 2026"
+            placeholder="مثال: كتاب التفوق فيزياء 2026"
             className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
           />
         </div>
 
+        {/* File Picker */}
         <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-2">اختر ملف PDF</label>
-          <div className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-2xl p-8 text-center bg-slate-50 transition cursor-pointer relative">
+          <label className="block text-xs font-semibold text-slate-700 mb-2">اختر ملف PDF (حتى 300+ صفحة)</label>
+          <div className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-2xl p-6 text-center bg-slate-50 transition cursor-pointer relative">
             <input
               type="file"
               accept=".pdf"
+              disabled={isProcessing || chunks.some(c => c.status === 'completed')}
               onChange={handleFileChange}
               className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
             />
-            <Upload className="w-10 h-10 text-slate-400 mx-auto mb-2" />
+            <Upload className="w-8 h-8 text-slate-400 mx-auto mb-2" />
             <span className="text-sm font-bold text-slate-700 block">
-              {file ? file.name : 'اضغط هنا لاختيار ملف PDF أو اسحبه إلى هنا'}
+              {file ? `${file.name} (${(file.size / (1024 * 1024)).toFixed(1)} MB)` : 'اضغط هنا لاختيار الكتاب أو الملف'}
             </span>
-            <span className="text-xs text-slate-400 block mt-1">
-              سيتم التخزين بأمان في Supabase Storage
-            </span>
+            {totalPages > 0 && (
+              <span className="text-xs font-semibold text-blue-600 block mt-1">
+                ✓ تم التعرف على {totalPages} صفحة
+              </span>
+            )}
           </div>
         </div>
+      </div>
 
-        <button
-          type="submit"
-          disabled={uploading || !file}
-          className="w-full py-3.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold rounded-xl shadow-lg shadow-blue-600/30 transition flex items-center justify-center gap-2"
-        >
-          {uploading ? (
-            <>
-              <Loader2 className="w-5 h-5 animate-spin" />
-              <span>جاري المعالجة الذكية للأسئلة والصور...</span>
-            </>
-          ) : (
-            <>
-              <Upload className="w-5 h-5" />
-              <span>رفع المستند واستخراج الأسئلة والصور</span>
-            </>
-          )}
-        </button>
-      </form>
+      {/* Auto-Chunking Execution Board */}
+      {chunks.length > 0 && (
+        <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-slate-100 pb-4">
+            <div>
+              <h2 className="text-lg font-bold text-slate-800 flex items-center gap-2">
+                <Layers className="w-5 h-5 text-blue-600" />
+                <span>خطة أجزاء الكتاب ({chunks.length} جزء)</span>
+              </h2>
+              <p className="text-xs text-slate-500 mt-0.5">
+                إجمالي الأسئلة المستخرجة حتى الآن: <strong className="text-emerald-600 font-bold">{totalExtractedQuestions} سؤال</strong>
+              </p>
+            </div>
+
+            {currentChunkIndex < chunks.length ? (
+              <button
+                type="button"
+                onClick={() => processChunk(currentChunkIndex)}
+                disabled={isProcessing}
+                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-sm rounded-xl shadow-md shadow-blue-600/20 transition flex items-center gap-2"
+              >
+                {isProcessing ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>جاري استخراج الجزء {currentChunkIndex + 1}...</span>
+                  </>
+                ) : (
+                  <>
+                    <Play className="w-4 h-4 fill-white" />
+                    <span>
+                      {chunks[currentChunkIndex]?.status === 'error' ? 'إعادة محاولة' : 'ابدأ استخراج'} الجزء {currentChunkIndex + 1} (ص {chunks[currentChunkIndex]?.startPage} - {chunks[currentChunkIndex]?.endPage})
+                    </span>
+                  </>
+                )}
+              </button>
+            ) : (
+              <div className="flex items-center gap-2 text-emerald-600 font-bold bg-emerald-50 px-4 py-2 rounded-xl border border-emerald-200 text-sm">
+                <Check className="w-4 h-4" />
+                <span>اكتمل استخراج جميع أجزاء الكتاب بنجاح!</span>
+              </div>
+            )}
+          </div>
+
+          {/* Chunks List */}
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-h-[400px] overflow-y-auto p-1">
+            {chunks.map((c) => {
+              const isCurrent = c.index === currentChunkIndex;
+              return (
+                <div
+                  key={c.index}
+                  className={`p-3.5 rounded-xl border transition flex items-center justify-between ${
+                    c.status === 'completed'
+                      ? 'bg-emerald-50/70 border-emerald-200 text-emerald-900'
+                      : c.status === 'processing'
+                      ? 'bg-blue-50/70 border-blue-300 text-blue-900 ring-2 ring-blue-500/30'
+                      : c.status === 'error'
+                      ? 'bg-red-50/70 border-red-200 text-red-900'
+                      : isCurrent
+                      ? 'bg-white border-blue-400 shadow-sm'
+                      : 'bg-slate-50 border-slate-200 text-slate-500'
+                  }`}
+                >
+                  <div className="flex items-center gap-3">
+                    <div
+                      className={`w-7 h-7 rounded-lg flex items-center justify-center font-bold text-xs ${
+                        c.status === 'completed'
+                          ? 'bg-emerald-600 text-white'
+                          : c.status === 'processing'
+                          ? 'bg-blue-600 text-white'
+                          : c.status === 'error'
+                          ? 'bg-red-600 text-white'
+                          : 'bg-slate-200 text-slate-700'
+                      }`}
+                    >
+                      {c.index + 1}
+                    </div>
+                    <div>
+                      <span className="font-bold text-sm block">
+                        الصفحات: {c.startPage} إلى {c.endPage}
+                      </span>
+                      <span className="text-xs opacity-75">
+                        {c.status === 'completed' && `تم استخراج ${c.questionsCount || 0} سؤال`}
+                        {c.status === 'processing' && 'جاري التحليل واستخراج الصور...'}
+                        {c.status === 'error' && 'فشل الاستخراج، يمكنك الإعادة'}
+                        {c.status === 'pending' && 'في الانتظار'}
+                      </span>
+                    </div>
+                  </div>
+
+                  <div>
+                    {c.status === 'completed' && (
+                      <CheckCircle className="w-5 h-5 text-emerald-600" />
+                    )}
+                    {c.status === 'processing' && (
+                      <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                    )}
+                    {c.status === 'error' && (
+                      <button
+                        type="button"
+                        disabled={isProcessing}
+                        onClick={() => processChunk(c.index)}
+                        className="text-xs bg-red-600 text-white px-2.5 py-1 rounded-lg font-bold hover:bg-red-500"
+                      >
+                        إعادة
+                      </button>
+                    )}
+                    {c.status === 'pending' && (
+                      <button
+                        type="button"
+                        disabled={isProcessing}
+                        onClick={() => processChunk(c.index)}
+                        className="text-xs bg-slate-100 hover:bg-blue-50 hover:text-blue-600 text-slate-700 px-2.5 py-1 rounded-lg font-semibold border border-slate-200 transition"
+                      >
+                        استخراج
+                      </button>
+                    )}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
