@@ -126,8 +126,8 @@ export default function AdminUploadPDFPage() {
 
       // 1. Send to AI
       const aiResult = await uploadPdfAndSeedBank(formData);
-      if (!aiResult.success || !aiResult.questions) {
-        throw new Error(aiResult.error || 'فشل استخراج الأسئلة');
+      if (!aiResult || !aiResult.success || !aiResult.questions) {
+        throw new Error(aiResult?.error || 'فشل استخراج الأسئلة من الملف');
       }
 
       setStatusMsg({ type: 'success', text: 'تم استخراج الأسئلة بنجاح. جاري الآن قص الصور للأسئلة الرسومية...' });
@@ -161,14 +161,16 @@ export default function AdminUploadPDFPage() {
       // 3. Save to DB
       const saveResult = await saveQuestionsBulk(
         selectedTeacherId,
-        aiResult.sourceData.id,
+        aiResult.sourceData?.id || '',
         selectedSubject,
         selectedGrade,
         selectedTerm,
         aiResult.questions
       );
 
-      if (!saveResult.success) throw new Error(saveResult.error);
+      if (!saveResult || !saveResult.success) {
+        throw new Error(saveResult?.error || 'فشل حفظ الأسئلة في قاعدة البيانات');
+      }
 
       setStatusMsg({
         type: 'success',
