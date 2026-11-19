@@ -19,6 +19,8 @@ import {
   QrCode,
   Save,
   AlertCircle,
+  Award,
+  Check,
 } from 'lucide-react';
 
 interface Subject { id: string; name: string; }
@@ -84,6 +86,9 @@ export default function CreateExamPage() {
   const [shuffleChoices, setShuffleChoices] = useState(true);
   const [shuffleNumbers, setShuffleNumbers] = useState(true);
   const [template] = useState('classic');
+
+  // ── Step 4 — Grading Mode (تخصيص الدرجات)
+  const [gradingMode, setGradingMode] = useState<'equal' | 'custom'>('equal');
 
   // ── Modals
   const [replacementModalOpen, setReplacementModalOpen] = useState(false);
@@ -152,6 +157,47 @@ export default function CreateExamPage() {
     ? easyCount + mediumCount + hardCount
     : mcqCount + essayCount + tfCount;
 
+  // Active Model Questions & Marks Calculations
+  const currentModelQuestions = generatedModels[activeModel]?.questions || [];
+  const totalQuestionsInModel = currentModelQuestions.length || 1;
+  const currentSumMarks = currentModelQuestions.reduce((sum: number, q: any) => sum + (Number(q.marks) || 1), 0);
+  const equalMarkPerQ = Math.max(1, Math.round((totalMark / totalQuestionsInModel) * 10) / 10);
+
+  // Toggle or select grading mode
+  function handleSelectGradingMode(mode: 'equal' | 'custom') {
+    setGradingMode(mode);
+    if (mode === 'equal') {
+      const updatedModels = generatedModels.map(m => ({
+        ...m,
+        questions: m.questions.map((q: any) => ({
+          ...q,
+          marks: equalMarkPerQ
+        }))
+      }));
+      setGeneratedModels(updatedModels);
+    }
+  }
+
+  // Update a single question's marks across models
+  function handleUpdateQuestionMarks(qIdOrIdx: string | number, newMarks: number) {
+    const safeMark = Math.max(1, Number(newMarks) || 1);
+    setGradingMode('custom');
+    const updatedModels = generatedModels.map(m => ({
+      ...m,
+      questions: m.questions.map((q: any, i: number) => {
+        if (q.id === qIdOrIdx || i === qIdOrIdx) {
+          return { ...q, marks: safeMark };
+        }
+        return q;
+      })
+    }));
+    setGeneratedModels(updatedModels);
+  }
+
+  function handleSyncTotalWithSum() {
+    setTotalMark(currentSumMarks);
+  }
+
   async function handleGenerate() {
     setGenerating(true);
     setError('');
@@ -189,13 +235,23 @@ export default function CreateExamPage() {
         .map(id => pool.find(q => q.id === id))
         .filter(Boolean) as Question[];
 
-      const models = generateExamModels(
+      let models = generateExamModels(
         selectedQs as any,
         modelsCount,
         shuffleQuestionOrder,
         shuffleChoices,
         shuffleNumbers
       );
+
+      // Apply initial equal marks distribution if equal mode
+      if (gradingMode === 'equal' && selectedQs.length > 0) {
+        const baseMark = Math.max(1, Math.round((totalMark / selectedQs.length) * 10) / 10);
+        models = models.map(m => ({
+          ...m,
+          questions: m.questions.map((q: any) => ({ ...q, marks: baseMark }))
+        }));
+      }
+
       setGeneratedModels(models);
       setStep(4);
     } catch (e: any) {
@@ -216,7 +272,7 @@ export default function CreateExamPage() {
     if (!best) { alert('لا توجد أسئلة بديلة غير مستخدمة.'); return; }
     const updated = [...generatedModels];
     const qs = [...currentModel.questions];
-    qs[questionIndex] = { ...best };
+    qs[questionIndex] = { ...best, marks: currentQ.marks || 2 };
     updated[activeModel] = { ...currentModel, questions: qs };
     setGeneratedModels(updated);
   }
@@ -231,9 +287,10 @@ export default function CreateExamPage() {
     if (targetQuestionIndex === null) return;
     const currentModel = generatedModels[activeModel];
     if (!currentModel) return;
+    const currentQ = currentModel.questions[targetQuestionIndex];
     const updated = [...generatedModels];
     const qs = [...currentModel.questions];
-    qs[targetQuestionIndex] = { ...q };
+    qs[targetQuestionIndex] = { ...q, marks: currentQ?.marks || 2 };
     updated[activeModel] = { ...currentModel, questions: qs };
     setGeneratedModels(updated);
     setReplacementModalOpen(false);
@@ -276,6 +333,8 @@ export default function CreateExamPage() {
       const { data: { user } } = await supabase.auth.getUser();
       if (!user) throw new Error('غير مسجل دخول');
       const totalQuestions = generatedModels[0]?.questions?.length || 0;
+      const finalTotalMarks = gradingMode === 'custom' ? currentSumMarks : totalMark;
+
       const { data: exam, error: examError } = await supabase.from('exams').insert({
         teacher_id: user.id,
         subject: subjectId,
@@ -284,7 +343,7 @@ export default function CreateExamPage() {
         duration_minutes: parseInt(duration),
         exam_date: examDate || null,
         instructions,
-        total_marks: totalMark,
+        total_marks: finalTotalMarks,
         total_questions: totalQuestions,
         models_count: modelsCount,
         template_name: template,
@@ -328,7 +387,7 @@ export default function CreateExamPage() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-black text-slate-800">إنشاء وتوليد امتحان جديد 📝⚡</h1>
-        <p className="text-xs text-slate-500 mt-1">اختر المصادر والفصول والأعداد، ثم راجع واستبدل أي سؤال قبل الحفظ.</p>
+        <p className="text-xs text-slate-500 mt-1">اختر المصادر والفصول والأعداد، ثم راجع وخصص درجات كل سؤال قبل الحفظ.</p>
       </div>
 
       {/* Stepper */}
@@ -482,7 +541,7 @@ export default function CreateExamPage() {
             </div>
           </div>
 
-          {/* Difficulty Distribution — always visible */}
+          {/* Difficulty Distribution */}
           <div className="space-y-2">
             <p className="text-xs font-bold text-slate-700">
               توزيع مستويات الصعوبة
@@ -612,7 +671,7 @@ export default function CreateExamPage() {
         </div>
       )}
 
-      {/* ── Step 4: Review, Replace, Edit, Save */}
+      {/* ── Step 4: Review, Replace, Edit, Custom Grading, and Save */}
       {step === 4 && generatedModels.length > 0 && (
         <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 space-y-5">
           {reasoning && (
@@ -621,10 +680,11 @@ export default function CreateExamPage() {
             </div>
           )}
 
+          {/* Models Tab Row */}
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-100">
             <div>
-              <h2 className="text-lg font-black text-slate-800">مراجعة الامتحان قبل الحفظ</h2>
-              <p className="text-xs text-slate-400 mt-0.5">يمكنك مراجعة كل نموذج، وتعديل أي سؤال، أو استبداله بسؤال آخر من البنك.</p>
+              <h2 className="text-lg font-black text-slate-800">مراجعة الامتحان وتخصيص الدرجات</h2>
+              <p className="text-xs text-slate-400 mt-0.5">يمكنك مراجعة كل نموذج، وتعديل أي سؤال، وتخصيص درجات الأسئلة بحرية.</p>
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-slate-500">معاينة النموذج:</span>
@@ -638,6 +698,98 @@ export default function CreateExamPage() {
             </div>
           </div>
 
+          {/* ─── NEW: Grading Mode Customization Box (خيارين لتوزيع الدرجات) ─── */}
+          <div className="p-4 bg-slate-50 rounded-2xl border border-slate-200 space-y-3">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div>
+                <span className="text-xs font-black text-slate-800 flex items-center gap-1.5">
+                  <Award className="w-4 h-4 text-amber-500" />
+                  <span>نظام وتوزيع درجات الامتحان:</span>
+                </span>
+                <span className="text-[11px] text-slate-500">
+                  اختر تقسيم الدرجة الكلية بالتساوي أو تخصيص درجة محددة لكل سؤال على حدة.
+                </span>
+              </div>
+
+              {/* Live Marks Counter Badge */}
+              <div className={`px-3 py-1.5 rounded-xl text-xs font-bold border flex items-center gap-1.5 ${
+                currentSumMarks === totalMark 
+                  ? 'bg-emerald-50 text-emerald-800 border-emerald-200' 
+                  : 'bg-amber-50 text-amber-800 border-amber-200'
+              }`}>
+                <span>مجموع درجات الأسئلة:</span>
+                <strong className="text-sm font-black">{currentSumMarks}</strong>
+                <span>من</span>
+                <strong className="text-sm font-black">{totalMark}</strong>
+                {currentSumMarks === totalMark ? (
+                  <span className="text-emerald-700 font-bold mr-1 flex items-center gap-0.5">
+                    <Check className="w-3.5 h-3.5 text-emerald-600" />
+                    <span>متطابق</span>
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={handleSyncTotalWithSum}
+                    title="مزامنة الدرجة الكلية للامتحان مع مجموع الأسئلة الحالي"
+                    className="mr-1 text-[11px] bg-amber-200 hover:bg-amber-300 text-amber-900 px-2 py-0.5 rounded-md transition font-black"
+                  >
+                    مزامنة ({currentSumMarks})
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {/* The 2 Choices Cards */}
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 pt-1">
+              {/* Option 1: Equal Distribution */}
+              <button
+                type="button"
+                onClick={() => handleSelectGradingMode('equal')}
+                className={`p-3 rounded-xl border text-right transition flex items-start gap-3 ${
+                  gradingMode === 'equal'
+                    ? 'border-blue-600 bg-blue-50/70 text-blue-900 ring-2 ring-blue-500/20 shadow-xs'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${
+                  gradingMode === 'equal' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'
+                }`}>
+                  {gradingMode === 'equal' && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                </div>
+                <div className="space-y-0.5">
+                  <span className="text-xs font-black block">1. تقسيم الدرجة الكلية بالتساوي</span>
+                  <span className="text-[11px] text-slate-500 block leading-relaxed">
+                    تقسيم الدرجة الكلية ({totalMark}) بالتساوي على {totalQuestionsInModel} سؤال = <strong>{equalMarkPerQ} درجة لكل سؤال</strong> تلقائياً.
+                  </span>
+                </div>
+              </button>
+
+              {/* Option 2: Custom per-question marks */}
+              <button
+                type="button"
+                onClick={() => handleSelectGradingMode('custom')}
+                className={`p-3 rounded-xl border text-right transition flex items-start gap-3 ${
+                  gradingMode === 'custom'
+                    ? 'border-blue-600 bg-blue-50/70 text-blue-900 ring-2 ring-blue-500/20 shadow-xs'
+                    : 'border-slate-200 bg-white text-slate-600 hover:bg-slate-50'
+                }`}
+              >
+                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center shrink-0 mt-0.5 ${
+                  gradingMode === 'custom' ? 'border-blue-600 bg-blue-600 text-white' : 'border-slate-300 bg-white'
+                }`}>
+                  {gradingMode === 'custom' && <Check className="w-3.5 h-3.5 stroke-[3]" />}
+                </div>
+                <div className="space-y-0.5">
+                  <span className="text-xs font-black block">2. تخصيص يدوي لكل سؤال</span>
+                  <span className="text-[11px] text-slate-500 block leading-relaxed">
+                    تحديد درجة مخصصة لكل سؤال بشكل منفصل (مثلاً: سؤال بـ 3 درجات، سؤال بـ 5 درجات).
+                  </span>
+                </div>
+              </button>
+            </div>
+          </div>
+
+          {/* Questions Review List */}
           <div className="border border-slate-200 rounded-2xl divide-y divide-slate-100 max-h-[550px] overflow-y-auto">
             {generatedModels[activeModel]?.questions?.map((q: any, idx: number) => (
               <div key={q.id || idx} className="p-4 hover:bg-slate-50/50 transition space-y-2">
@@ -653,7 +805,38 @@ export default function CreateExamPage() {
                           {q.difficulty === 'easy' ? '🟢 سهل' : q.difficulty === 'hard' ? '🔴 صعب' : '🟡 متوسط'}
                         </span>
                         {q.chapter && <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 font-semibold">{q.chapter}</span>}
+
+                        {/* Interactive Marks Allocator for this question */}
+                        <div className="mr-auto flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-xl border border-slate-200">
+                          <span className="text-[11px] font-bold text-slate-600">الدرجة:</span>
+                          <input
+                            type="number"
+                            min={1}
+                            max={50}
+                            value={q.marks || 1}
+                            onChange={(e) => handleUpdateQuestionMarks(q.id || idx, Number(e.target.value))}
+                            className="w-12 text-center bg-white border border-slate-300 rounded-lg py-0.5 text-xs font-black text-slate-800 outline-none focus:ring-2 focus:ring-blue-500"
+                          />
+                          {/* Quick selection chips: 1, 2, 3, 5 */}
+                          <div className="flex gap-0.5">
+                            {[1, 2, 3, 5].map((m) => (
+                              <button
+                                key={m}
+                                type="button"
+                                onClick={() => handleUpdateQuestionMarks(q.id || idx, m)}
+                                className={`w-5 h-5 rounded-md text-[10px] font-black transition ${
+                                  q.marks === m 
+                                    ? 'bg-blue-600 text-white shadow-2xs' 
+                                    : 'bg-white text-slate-600 hover:bg-slate-200 border border-slate-200'
+                                }`}
+                              >
+                                {m}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
                       </div>
+
                       <p className="text-sm font-bold text-slate-800 leading-relaxed pt-1">{q.text || q.question_text}</p>
                       {q.choices?.length > 0 && (
                         <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
@@ -687,8 +870,12 @@ export default function CreateExamPage() {
           </div>
 
           <div className="flex flex-col sm:flex-row items-center justify-between gap-3 pt-3 border-t border-slate-100">
-            <div className="text-xs font-bold text-slate-500">
-              النموذج الحالي ({['أ', 'ب', 'ج', 'د'][activeModel]}): يحتوي على {generatedModels[activeModel]?.questions?.length || 0} سؤال | {totalMark} درجة
+            <div className="text-xs font-bold text-slate-600 flex items-center gap-2">
+              <span>النموذج الحالي ({['أ', 'ب', 'ج', 'د'][activeModel]}):</span>
+              <span className="px-2 py-0.5 bg-blue-50 text-blue-700 rounded-md font-black">{totalQuestionsInModel} سؤال</span>
+              <span>|</span>
+              <span>إجمالي الدرجات:</span>
+              <span className="px-2 py-0.5 bg-amber-50 text-amber-800 rounded-md font-black">{currentSumMarks} درجة</span>
             </div>
             <div className="flex gap-2">
               <button onClick={() => { setStep(2); setGeneratedModels([]); }} className="px-4 py-2 border border-slate-300 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition">إعادة التوليد</button>
