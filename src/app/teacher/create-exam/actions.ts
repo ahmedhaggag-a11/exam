@@ -14,6 +14,7 @@ export interface GenerateExamConfig {
   selected_chapters: string[];
   total_questions: number;
   question_types: { mcq: number; essay: number; true_false: number };
+  difficulty_counts?: { easy: number; medium: number; hard: number };
   grade: string;
   duration: number;
   instructions: string;
@@ -25,6 +26,7 @@ export interface QuestionPoolItem {
   question_type: string;
   difficulty: string;
   chapter: string;
+  source_id?: string | null;
 }
 
 export async function generateExamAction(
@@ -39,10 +41,35 @@ export async function generateExamAction(
 
   // Fallback: algorithmic selection without AI
   const fallback = () => {
+    const shuffle = (arr: QuestionPoolItem[]) => [...arr].sort(() => Math.random() - 0.5);
+
+    // If difficulty counts are provided and requested
+    if (config.difficulty_counts && (config.difficulty_counts.easy + config.difficulty_counts.medium + config.difficulty_counts.hard > 0)) {
+      const easyPool = shuffle(pool.filter(q => q.difficulty === 'easy'));
+      const medPool = shuffle(pool.filter(q => q.difficulty === 'medium'));
+      const hardPool = shuffle(pool.filter(q => q.difficulty === 'hard'));
+
+      const selectedByDiff = [
+        ...easyPool.slice(0, config.difficulty_counts.easy),
+        ...medPool.slice(0, config.difficulty_counts.medium),
+        ...hardPool.slice(0, config.difficulty_counts.hard),
+      ];
+
+      if (selectedByDiff.length < config.total_questions) {
+        const usedIds = new Set(selectedByDiff.map(q => q.id));
+        const remaining = shuffle(pool.filter(q => !usedIds.has(q.id)));
+        selectedByDiff.push(...remaining.slice(0, config.total_questions - selectedByDiff.length));
+      }
+
+      return {
+        selected_question_ids: selectedByDiff.slice(0, config.total_questions).map(q => q.id),
+        reasoning: 'تم الاختيار الخوارزمي الدقيق بناءً على مستويات الصعوبة المحددة',
+      };
+    }
+
     const mcqPool = pool.filter(q => q.question_type === 'mcq');
     const essayPool = pool.filter(q => q.question_type === 'essay');
     const tfPool = pool.filter(q => q.question_type === 'true_false');
-    const shuffle = (arr: QuestionPoolItem[]) => [...arr].sort(() => Math.random() - 0.5);
 
     const selected = [
       ...shuffle(mcqPool).slice(0, config.question_types.mcq),
@@ -58,7 +85,7 @@ export async function generateExamAction(
     }
 
     return {
-      selected_question_ids: selected.map(q => q.id),
+      selected_question_ids: selected.slice(0, config.total_questions).map(q => q.id),
       reasoning: 'تم الاختيار الخوارزمي بناءً على توزيع أنواع الأسئلة',
     };
   };
@@ -89,12 +116,13 @@ export async function generateExamAction(
 - أسئلة اختيار من متعدد: ${config.question_types.mcq}
 - أسئلة مقالية: ${config.question_types.essay}
 - أسئلة صح/خطأ: ${config.question_types.true_false}
+${config.difficulty_counts ? `- مستويات الصعوبة المطلوبة: سهل (${config.difficulty_counts.easy})، متوسط (${config.difficulty_counts.medium})، صعب (${config.difficulty_counts.hard})` : ''}
 
 قواعد صارمة:
 1. اختر IDs حقيقية من البنك فقط - لا تخترع IDs
-2. التزم بالأعداد المحددة لكل نوع قدر الإمكان
+2. التزم بالأعداد المحددة لكل نوع وصعوبة قدر الإمكان
 3. وزّع الأسئلة على الفصول بشكل متوازن
-4. فضّل الأسئلة متنوعة الصعوبة
+4. فضّل الأسئلة المتطابقة مع مستويات الصعوبة المطلوبة
 
 بنك الأسئلة:
 ${JSON.stringify(bankSummary)}
