@@ -145,7 +145,8 @@ export async function uploadPdfAndSeedBank(formData: FormData) {
   const file = formData.get('file') as File;
   const teacherId = formData.get('teacherId') as string;
   const subject = formData.get('subject') as string;
-  const chapterName = formData.get('chapterName') as string;
+  const gradeLevel = (formData.get('gradeLevel') as string) || 'الصف الثالث الثانوي';
+  const term = (formData.get('term') as string) || 'الترم الأول';
   const sourceName = formData.get('sourceName') as string;
 
   if (!file || !teacherId) {
@@ -183,7 +184,8 @@ export async function uploadPdfAndSeedBank(formData: FormData) {
         storage_path: storagePath,
         file_url: publicUrl,
         subject: subject,
-        grade_level: 'الصف الثالث الثانوي',
+        grade_level: gradeLevel,
+        term: term,
         file_size: file.size,
         status: 'processing',
       })
@@ -196,7 +198,7 @@ export async function uploadPdfAndSeedBank(formData: FormData) {
     const extractedQuestions = await extractQuestionsFromPDF(
       fileBuffer,
       subject,
-      chapterName,
+      '',
       sourceName
     );
 
@@ -215,7 +217,8 @@ export async function saveQuestionsBulk(
   teacherId: string, 
   sourceId: string, 
   subject: string, 
-  defaultChapter: string, 
+  gradeLevel: string,
+  term: string,
   questions: any[]
 ) {
   try {
@@ -228,9 +231,10 @@ export async function saveQuestionsBulk(
         question_type: q.question_type || 'mcq',
         difficulty: q.difficulty || 'medium',
         subject: subject,
-        chapter: q.chapter || defaultChapter || 'الفصل الأول',
+        chapter: q.chapter || null,
         lesson: q.lesson || null,
-        grade_level: 'الصف الثالث الثانوي',
+        grade_level: gradeLevel || 'الصف الثالث الثانوي',
+        term: term || 'الترم الأول',
         marks: q.question_type === 'essay' ? 4 : 2,
         model_answer: q.model_answer || null,
         needs_review: q.needs_review || false,

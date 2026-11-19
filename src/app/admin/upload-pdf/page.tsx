@@ -13,13 +13,15 @@ interface TeacherProfile {
   full_name: string;
   email: string;
   subjects: string[];
+  grades: string[];
 }
 
 export default function AdminUploadPDFPage() {
   const [teachers, setTeachers] = useState<TeacherProfile[]>([]);
   const [selectedTeacherId, setSelectedTeacherId] = useState('');
   const [selectedSubject, setSelectedSubject] = useState('الفيزياء');
-  const [chapterName, setChapterName] = useState('الفصل الأول');
+  const [selectedGrade, setSelectedGrade] = useState('');
+  const [selectedTerm, setSelectedTerm] = useState('الترم الأول');
   const [sourceName, setSourceName] = useState('');
   const [file, setFile] = useState<File | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -31,13 +33,16 @@ export default function AdminUploadPDFPage() {
     async function loadTeachers() {
       const { data } = await supabase
         .from('profiles')
-        .select('id, full_name, email, subjects')
+        .select('id, full_name, email, subjects, grades')
         .eq('role', 'teacher');
       if (data && data.length > 0) {
         setTeachers(data);
         setSelectedTeacherId(data[0].id);
         if (data[0].subjects && data[0].subjects.length > 0) {
           setSelectedSubject(data[0].subjects[0]);
+        }
+        if (data[0].grades && data[0].grades.length > 0) {
+          setSelectedGrade(data[0].grades[0]);
         }
       }
     }
@@ -116,7 +121,8 @@ export default function AdminUploadPDFPage() {
       formData.append('file', file);
       formData.append('teacherId', selectedTeacherId);
       formData.append('subject', selectedSubject);
-      formData.append('chapterName', chapterName);
+      formData.append('gradeLevel', selectedGrade);
+      formData.append('term', selectedTerm);
       formData.append('sourceName', sourceName || file.name);
 
       // 1. Send to AI
@@ -158,7 +164,8 @@ export default function AdminUploadPDFPage() {
         selectedTeacherId,
         aiResult.sourceData.id,
         selectedSubject,
-        chapterName,
+        selectedGrade,
+        selectedTerm,
         aiResult.questions
       );
 
@@ -218,6 +225,9 @@ export default function AdminUploadPDFPage() {
               if (t && t.subjects && t.subjects.length > 0) {
                 setSelectedSubject(t.subjects[0]);
               }
+              if (t && t.grades && t.grades.length > 0) {
+                setSelectedGrade(t.grades[0]);
+              }
             }}
             className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
           >
@@ -229,7 +239,7 @@ export default function AdminUploadPDFPage() {
           </select>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <div>
             <label className="block text-xs font-semibold text-slate-700 mb-1.5">المادة الدراسية</label>
             <input
@@ -240,15 +250,40 @@ export default function AdminUploadPDFPage() {
             />
           </div>
 
+          {/* السنة الدراسية - تُسحب من صلاحيات المعلم */}
           <div>
-            <label className="block text-xs font-semibold text-slate-700 mb-1.5">اسم الفصل / الباب</label>
-            <input
-              type="text"
-              value={chapterName}
-              onChange={(e) => setChapterName(e.target.value)}
-              placeholder="الفصل الأول: التيار الكهربي"
-              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm focus:ring-2 focus:ring-blue-500 outline-none"
-            />
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5">السنة الدراسية</label>
+            <select
+              value={selectedGrade}
+              onChange={(e) => setSelectedGrade(e.target.value)}
+              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              {/* From teacher profile grades */}
+              {(teachers.find(t => t.id === selectedTeacherId)?.grades || []).map((g) => (
+                <option key={g} value={g}>{g}</option>
+              ))}
+              {/* Fallback if teacher has no grades */}
+              {(teachers.find(t => t.id === selectedTeacherId)?.grades || []).length === 0 && (
+                <>
+                  <option value="الصف الأول الثانوي">الصف الأول الثانوي</option>
+                  <option value="الصف الثاني الثانوي">الصف الثاني الثانوي</option>
+                  <option value="الصف الثالث الثانوي">الصف الثالث الثانوي</option>
+                </>
+              )}
+            </select>
+          </div>
+
+          {/* الترم */}
+          <div>
+            <label className="block text-xs font-semibold text-slate-700 mb-1.5">الترم الدراسي</label>
+            <select
+              value={selectedTerm}
+              onChange={(e) => setSelectedTerm(e.target.value)}
+              className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              <option value="الترم الأول">الترم الأول</option>
+              <option value="الترم الثاني">الترم الثاني</option>
+            </select>
           </div>
         </div>
 

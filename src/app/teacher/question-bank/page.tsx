@@ -30,6 +30,7 @@ export default function TeacherQuestionBankPage() {
   // Filters state
   const [searchTerm, setSearchTerm] = useState('');
   const [selectedGrade, setSelectedGrade] = useState<string>('all');
+  const [selectedTerm, setSelectedTerm] = useState<string>('all');
   const [selectedSource, setSelectedSource] = useState<string>('all');
   const [selectedChapter, setSelectedChapter] = useState<string>('all');
   const [selectedLesson, setSelectedLesson] = useState<string>('all');
@@ -154,6 +155,12 @@ export default function TeacherQuestionBankPage() {
         if (qGrade !== selectedGrade) return false;
       }
 
+      // 2b. Term (الترم)
+      if (selectedTerm !== 'all') {
+        const qTerm = (q as any).term || '';
+        if (qTerm !== selectedTerm) return false;
+      }
+
       // 3. Source (المصدر)
       if (selectedSource !== 'all') {
         if (q.source_id !== selectedSource) return false;
@@ -184,7 +191,8 @@ export default function TeacherQuestionBankPage() {
   }, [
     questions, 
     searchTerm, 
-    selectedGrade, 
+    selectedGrade,
+    selectedTerm,
     selectedSource, 
     selectedChapter, 
     selectedLesson, 
@@ -195,6 +203,7 @@ export default function TeacherQuestionBankPage() {
   const resetFilters = () => {
     setSearchTerm('');
     setSelectedGrade('all');
+    setSelectedTerm('all');
     setSelectedSource('all');
     setSelectedChapter('all');
     setSelectedLesson('all');
@@ -205,6 +214,7 @@ export default function TeacherQuestionBankPage() {
   const hasActiveFilters =
     searchTerm !== '' ||
     selectedGrade !== 'all' ||
+    selectedTerm !== 'all' ||
     selectedSource !== 'all' ||
     selectedChapter !== 'all' ||
     selectedLesson !== 'all' ||
@@ -267,7 +277,7 @@ export default function TeacherQuestionBankPage() {
         </div>
 
         {/* 6 Filters Grid */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-3 pt-1">
+        <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-7 gap-3 pt-1">
           {/* 1. السنة الدراسية */}
           <div>
             <label className="text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1.5">
@@ -288,11 +298,28 @@ export default function TeacherQuestionBankPage() {
             </select>
           </div>
 
+          {/* 2. الترم الدراسي */}
+          <div>
+            <label className="text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1.5">
+              <Layers className="w-3.5 h-3.5 text-cyan-600" />
+              <span>2. الترم</span>
+            </label>
+            <select
+              value={selectedTerm}
+              onChange={(e) => setSelectedTerm(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold text-slate-700 focus:ring-2 focus:ring-blue-500 outline-none"
+            >
+              <option value="all">الكل (الترمين)</option>
+              <option value="الترم الأول">الترم الأول</option>
+              <option value="الترم الثاني">الترم الثاني</option>
+            </select>
+          </div>
+
           {/* 2. المصدر */}
           <div>
             <label className="text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1.5">
               <BookOpen className="w-3.5 h-3.5 text-indigo-600" />
-              <span>2. المصدر / الكتاب</span>
+              <span>3. المصدر / الكتاب</span>
             </label>
             <select
               value={selectedSource}
@@ -312,7 +339,7 @@ export default function TeacherQuestionBankPage() {
           <div>
             <label className="text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1.5">
               <Layers className="w-3.5 h-3.5 text-amber-600" />
-              <span>3. الفصل / الباب</span>
+              <span>4. الفصل / الباب</span>
             </label>
             <select
               value={selectedChapter}
@@ -335,7 +362,7 @@ export default function TeacherQuestionBankPage() {
           <div>
             <label className="text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1.5">
               <Bookmark className="w-3.5 h-3.5 text-emerald-600" />
-              <span>4. اسم الدرس</span>
+              <span>5. اسم الدرس</span>
             </label>
             <select
               value={selectedLesson}
@@ -362,7 +389,7 @@ export default function TeacherQuestionBankPage() {
           <div>
             <label className="text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1.5">
               <HelpCircle className="w-3.5 h-3.5 text-purple-600" />
-              <span>5. نوع السؤال</span>
+              <span>6. نوع السؤال</span>
             </label>
             <select
               value={selectedType}
@@ -380,7 +407,7 @@ export default function TeacherQuestionBankPage() {
           <div>
             <label className="text-xs font-bold text-slate-600 mb-1.5 flex items-center gap-1.5">
               <Gauge className="w-3.5 h-3.5 text-rose-600" />
-              <span>6. مستوى الصعوبة</span>
+              <span>7. مستوى الصعوبة</span>
             </label>
             <select
               value={selectedDifficulty}
