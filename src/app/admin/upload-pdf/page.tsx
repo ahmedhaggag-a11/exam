@@ -294,7 +294,9 @@ export default function AdminUploadPDFPage() {
 
       setStatusMsg({
         type: 'success',
-        text: `تم بنجاح الانتهاء من استخراج وحفظ الجزء (${chunkIdx + 1}) بواقع ${extractedQs.length} سؤال! جاهز لبدء الجزء التالي.`,
+        text: extractedQs.length > 0 
+          ? `تم بنجاح استخراج وحفظ الجزء (${chunkIdx + 1}) بواقع ${extractedQs.length} سؤال!`
+          : `اكتمل فحص الجزء (${chunkIdx + 1}) - صفحات شرح بدون أسئلة. تم التخطي بنجاح!`,
       });
     } catch (err: any) {
       console.error(err);
