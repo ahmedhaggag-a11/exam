@@ -5,6 +5,7 @@ import { createClient } from '@/lib/supabase/client';
 import { Upload, CheckCircle, AlertCircle, Loader2 } from 'lucide-react';
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
+import { uploadPdfAndSeedBank, saveQuestionsBulk, uploadImageFromBase64 } from './actions';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
@@ -115,8 +116,6 @@ export default function AdminUploadPDFPage() {
     setStatusMsg({ type: 'success', text: 'يتم الآن تحليل الـ PDF بواسطة الذكاء الاصطناعي (قد يستغرق دقائق)...' });
 
     try {
-      const { uploadPdfAndSeedBank, saveQuestionsBulk, uploadImageFromBase64 } = await import('./actions');
-      
       const formData = new FormData();
       formData.append('file', file);
       formData.append('teacherId', selectedTeacherId);

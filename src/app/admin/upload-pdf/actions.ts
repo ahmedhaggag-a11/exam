@@ -185,7 +185,6 @@ export async function uploadPdfAndSeedBank(formData: FormData) {
         file_url: publicUrl,
         subject: subject,
         grade_level: gradeLevel,
-        term: term,
         file_size: file.size,
         status: 'processing',
       })
@@ -231,7 +230,7 @@ export async function saveQuestionsBulk(
         question_type: q.question_type || 'mcq',
         difficulty: q.difficulty || 'medium',
         subject: subject,
-        chapter: q.chapter || null,
+        chapter: q.chapter || 'عام',
         lesson: q.lesson || null,
         grade_level: gradeLevel || 'الصف الثالث الثانوي',
         term: term || 'الترم الأول',
