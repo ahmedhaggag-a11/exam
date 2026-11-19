@@ -239,8 +239,8 @@ export default function AdminUploadPDFPage() {
         chunkLabel
       );
 
-      if (!extractRes.success || !extractRes.questions) {
-        throw new Error(extractRes.error || 'فشل استخراج أسئلة هذا الجزء');
+      if (!extractRes || !extractRes.success || !extractRes.questions) {
+        throw new Error(extractRes?.error || 'فشل استخراج أسئلة هذا الجزء من السيرفر');
       }
 
       const extractedQs = extractRes.questions;

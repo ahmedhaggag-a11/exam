@@ -92,7 +92,7 @@ async function extractQuestionsFromPDF(
   let responseText: string | undefined = undefined;
 
   for (const modelName of CANDIDATE_MODELS) {
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < 3; attempt++) {
       try {
         const result = await ai.models.generateContent({
           model: modelName,
@@ -120,8 +120,9 @@ async function extractQuestionsFromPDF(
         }
       } catch (err: any) {
         lastError = err;
-        console.warn(`Gemini extraction attempt failed with model ${modelName}:`, err?.message || err);
-        await new Promise(r => setTimeout(r, 1000));
+        console.warn(`Gemini extraction attempt ${attempt + 1} failed with model ${modelName}:`, err?.message || err);
+        // Exponential backoff for 503 high demand spikes
+        await new Promise(r => setTimeout(r, (attempt + 1) * 2000));
       }
     }
     if (responseText) break;
