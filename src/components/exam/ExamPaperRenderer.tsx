@@ -117,19 +117,6 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
         fontSize: config.fontSize === 'sm' ? '0.875rem' : config.fontSize === 'lg' ? '1.125rem' : '1rem',
       }}
     >
-      {/* BACKGROUND IMAGE */}
-      {config.backgroundImage?.enabled && config.backgroundImage.url && (
-        <div
-          className="absolute inset-0 pointer-events-none select-none z-0 overflow-hidden rounded-inherit"
-          style={{
-            backgroundImage: `url(${config.backgroundImage.url})`,
-            backgroundSize: config.backgroundImage.size === 'repeat' ? 'auto' : config.backgroundImage.size,
-            backgroundRepeat: config.backgroundImage.size === 'repeat' ? 'repeat' : 'no-repeat',
-            backgroundPosition: 'center',
-            opacity: config.backgroundImage.opacity,
-          }}
-        />
-      )}
       {/* WATERMARK */}
       {config.watermark.enabled && config.watermark.text && (
         <div
