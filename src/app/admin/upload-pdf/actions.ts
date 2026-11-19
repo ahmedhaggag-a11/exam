@@ -19,9 +19,9 @@ function bufferToBase64(buffer: ArrayBuffer): string {
   return btoa(binary);
 }
 
-// Extract questions from PDF using Gemini Vision API
-async function extractQuestionsFromPDF(
-  pdfBuffer: ArrayBuffer,
+// Extract questions using Gemini Multimodal Vision API (supports PDF or image arrays)
+async function extractQuestionsMultimodal(
+  parts: Array<{ inlineData: { data: string; mimeType: string } }>,
   subject: string,
   defaultChapterName: string,
   sourceName: string
@@ -32,7 +32,6 @@ async function extractQuestionsFromPDF(
   }
 
   const ai = new GoogleGenAI({ apiKey });
-  const pdfBase64 = bufferToBase64(pdfBuffer);
 
   const prompt = `أنت خبير تربوي وموجّه أول متخصص في تحليل المناهج والكتب المدرسية واستخراج بنوك الأسئلة بدقة فائقة.
 
@@ -101,12 +100,7 @@ async function extractQuestionsFromPDF(
             {
               role: 'user',
               parts: [
-                {
-                  inlineData: {
-                    data: pdfBase64,
-                    mimeType: 'application/pdf',
-                  },
-                },
+                ...parts,
                 { text: prompt },
               ],
             },
@@ -188,21 +182,31 @@ export async function registerSourceRecord(
 }
 
 export async function extractQuestionsFromChunkAction(
-  chunkBufferBase64: string,
+  chunkInput: string | { pdfBase64?: string; imagesBase64?: string[] },
   subject: string,
   sourceName: string,
   chunkLabel: string
 ) {
   try {
-    const binary = atob(chunkBufferBase64);
-    const bytes = new Uint8Array(binary.length);
-    for (let i = 0; i < binary.length; i++) {
-      bytes[i] = binary.charCodeAt(i);
-    }
-    const buffer = bytes.buffer;
+    let parts: Array<{ inlineData: { data: string; mimeType: string } }> = [];
 
-    const extractedQuestions = await extractQuestionsFromPDF(
-      buffer,
+    if (typeof chunkInput === 'string') {
+      parts = [{ inlineData: { data: chunkInput, mimeType: 'application/pdf' } }];
+    } else if (chunkInput && chunkInput.pdfBase64) {
+      parts = [{ inlineData: { data: chunkInput.pdfBase64, mimeType: 'application/pdf' } }];
+    } else if (chunkInput && chunkInput.imagesBase64 && chunkInput.imagesBase64.length > 0) {
+      parts = chunkInput.imagesBase64.map((b64) => ({
+        inlineData: {
+          data: b64,
+          mimeType: 'image/jpeg',
+        },
+      }));
+    } else {
+      throw new Error('لم يتم إرسال أي صفحات صالحة للمعالجة');
+    }
+
+    const extractedQuestions = await extractQuestionsMultimodal(
+      parts,
       subject,
       chunkLabel,
       sourceName
@@ -275,8 +279,9 @@ export async function uploadPdfAndSeedBank(formData: FormData) {
     if (sourceError) throw new Error(`خطأ في حفظ بيانات المصدر: ${sourceError.message}`);
 
     // 3. Extract questions using Gemini Vision AI
-    const extractedQuestions = await extractQuestionsFromPDF(
-      fileBuffer,
+    const pdfBase64 = bufferToBase64(fileBuffer);
+    const extractedQuestions = await extractQuestionsMultimodal(
+      [{ inlineData: { data: pdfBase64, mimeType: 'application/pdf' } }],
       subject,
       '',
       sourceName

@@ -58,6 +58,7 @@ export default function AdminUploadPDFPage() {
   const [chunks, setChunks] = useState<ChunkInfo[]>([]);
   const [currentChunkIndex, setCurrentChunkIndex] = useState<number>(0);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [autoPlay, setAutoPlay] = useState<boolean>(true); // Auto-advance to next chunk
   const [totalExtractedQuestions, setTotalExtractedQuestions] = useState(0);
 
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
@@ -100,14 +101,24 @@ export default function AdminUploadPDFPage() {
         const pages = pdfDoc.numPages;
         setTotalPages(pages);
 
+        // Auto-recommend chunk size based on file weight
+        let activeChunkSize = chunkSize;
+        if (f.size > 80 * 1024 * 1024) {
+          activeChunkSize = 3;
+          setChunkSize(3);
+        } else if (f.size > 40 * 1024 * 1024) {
+          activeChunkSize = 3;
+          setChunkSize(3);
+        }
+
         // Generate chunks
         const generatedChunks: ChunkInfo[] = [];
         let chunkIndex = 0;
-        for (let i = 1; i <= pages; i += chunkSize) {
+        for (let i = 1; i <= pages; i += activeChunkSize) {
           generatedChunks.push({
             index: chunkIndex,
             startPage: i,
-            endPage: Math.min(i + chunkSize - 1, pages),
+            endPage: Math.min(i + activeChunkSize - 1, pages),
             status: 'pending',
           });
           chunkIndex++;
@@ -117,7 +128,7 @@ export default function AdminUploadPDFPage() {
         setTotalExtractedQuestions(0);
         setStatusMsg({
           type: 'success',
-          text: `تم تحميل المستند بنجاح! إجمالي الصفحات: ${pages} صفحة تم تقسيمها تلقائياً إلى ${generatedChunks.length} جزء (كل جزء ${chunkSize} صفحات لضمان الأمان والسرعة للكتب الثقيلة).`,
+          text: `تم تحميل المستند بنجاح! إجمالي الصفحات: ${pages} صفحة تم تقسيمها تلقائياً إلى ${generatedChunks.length} جزء (كل جزء ${activeChunkSize} صفحات لتفادي أي ثقل وضمان السرعة القصوى).`,
         });
       } catch (err: any) {
         console.error('Error reading PDF:', err);
@@ -207,33 +218,71 @@ export default function AdminUploadPDFPage() {
         setSourceRecordId(activeSourceId);
       }
 
-      // 2. Slice pages using pdf-lib in browser
+      // 2. Prepare chunk payload (PDF slice or rendered compressed JPEG images)
       const fullBuffer = await file.arrayBuffer();
-      const originalPdfDoc = await PDFDocument.load(fullBuffer);
-      const subPdfDoc = await PDFDocument.create();
+      let chunkPayload: { pdfBase64?: string; imagesBase64?: string[] } = {};
 
-      // Zero-based page indices
-      const pageIndices: number[] = [];
-      for (let p = chunk.startPage - 1; p < chunk.endPage; p++) {
-        pageIndices.push(p);
+      try {
+        const originalPdfDoc = await PDFDocument.load(fullBuffer);
+        const subPdfDoc = await PDFDocument.create();
+
+        const pageIndices: number[] = [];
+        for (let p = chunk.startPage - 1; p < chunk.endPage; p++) {
+          pageIndices.push(p);
+        }
+
+        const copiedPages = await subPdfDoc.copyPages(originalPdfDoc, pageIndices);
+        copiedPages.forEach((page) => subPdfDoc.addPage(page));
+
+        const chunkPdfBytes = await subPdfDoc.save();
+
+        // If sliced PDF is smaller than 3MB, send directly as PDF
+        if (chunkPdfBytes.byteLength < 3.2 * 1024 * 1024) {
+          let binary = '';
+          for (let i = 0; i < chunkPdfBytes.byteLength; i++) {
+            binary += String.fromCharCode(chunkPdfBytes[i]);
+          }
+          chunkPayload = { pdfBase64: btoa(binary) };
+        } else {
+          // If sliced PDF is heavy (> 3.2MB) from high-res scans, render to compressed JPEGs (~200KB per page)
+          console.info(`Chunk ${chunkIdx + 1} is ${(chunkPdfBytes.byteLength / (1024 * 1024)).toFixed(1)}MB; rendering to lightweight JPEGs for Vercel.`);
+          const pdfJsDoc = await pdfjsLib.getDocument({ data: fullBuffer }).promise;
+          const images: string[] = [];
+          for (let p = chunk.startPage; p <= chunk.endPage; p++) {
+            const page = await pdfJsDoc.getPage(p);
+            const viewport = page.getViewport({ scale: 1.5 });
+            const canvas = document.createElement('canvas');
+            canvas.width = viewport.width;
+            canvas.height = viewport.height;
+            const ctx = canvas.getContext('2d');
+            await page.render({ canvasContext: ctx, viewport }).promise;
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+            images.push(dataUrl.split(',')[1]);
+          }
+          chunkPayload = { imagesBase64: images };
+        }
+      } catch (sliceErr) {
+        console.warn('PDF-lib slice failed or heavy, rendering pages via canvas:', sliceErr);
+        const pdfJsDoc = await pdfjsLib.getDocument({ data: fullBuffer }).promise;
+        const images: string[] = [];
+        for (let p = chunk.startPage; p <= chunk.endPage; p++) {
+          const page = await pdfJsDoc.getPage(p);
+          const viewport = page.getViewport({ scale: 1.5 });
+          const canvas = document.createElement('canvas');
+          canvas.width = viewport.width;
+          canvas.height = viewport.height;
+          const ctx = canvas.getContext('2d');
+          await page.render({ canvasContext: ctx, viewport }).promise;
+          const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
+          images.push(dataUrl.split(',')[1]);
+        }
+        chunkPayload = { imagesBase64: images };
       }
 
-      const copiedPages = await subPdfDoc.copyPages(originalPdfDoc, pageIndices);
-      copiedPages.forEach((page) => subPdfDoc.addPage(page));
-
-      const chunkPdfBytes = await subPdfDoc.save();
-      
-      // Convert chunk bytes to base64
-      let binary = '';
-      for (let i = 0; i < chunkPdfBytes.byteLength; i++) {
-        binary += String.fromCharCode(chunkPdfBytes[i]);
-      }
-      const chunkBase64 = btoa(binary);
-
-      // 3. Send lightweight chunk to Gemini
+      // 3. Send lightweight chunk to Gemini Multimodal
       const chunkLabel = `الجزء ${chunkIdx + 1} (ص ${chunk.startPage} - ${chunk.endPage})`;
       const extractRes = await extractQuestionsFromChunkAction(
-        chunkBase64,
+        chunkPayload,
         selectedSubject,
         sourceName || file.name,
         chunkLabel
@@ -290,14 +339,30 @@ export default function AdminUploadPDFPage() {
       );
 
       setTotalExtractedQuestions((prev) => prev + extractedQs.length);
-      setCurrentChunkIndex(chunkIdx + 1);
+      const nextIdx = chunkIdx + 1;
+      setCurrentChunkIndex(nextIdx);
 
-      setStatusMsg({
-        type: 'success',
-        text: extractedQs.length > 0 
-          ? `تم بنجاح استخراج وحفظ الجزء (${chunkIdx + 1}) بواقع ${extractedQs.length} سؤال!`
-          : `اكتمل فحص الجزء (${chunkIdx + 1}) - صفحات شرح بدون أسئلة. تم التخطي بنجاح!`,
-      });
+      const msg = extractedQs.length > 0 
+        ? `تم بنجاح استخراج وحفظ الجزء (${chunkIdx + 1}) بواقع ${extractedQs.length} سؤال!`
+        : `اكتمل فحص الجزء (${chunkIdx + 1}) - صفحات شرح بدون أسئلة. تم التخطي بنجاح!`;
+
+      if (autoPlay && nextIdx < chunks.length) {
+        setStatusMsg({
+          type: 'success',
+          text: `${msg} جاري الانتقال للجزء التالي (${nextIdx + 1}/${chunks.length}) تلقائياً...`,
+        });
+        // Wait 1.5 seconds and trigger next chunk automatically
+        setTimeout(() => {
+          processChunk(nextIdx);
+        }, 1500);
+      } else {
+        setStatusMsg({
+          type: 'success',
+          text: nextIdx >= chunks.length 
+            ? `🎉 مبروك! اكتمل استخراج جميع أجزاء الكتاب بنجاح وحفظ ${totalExtractedQuestions + extractedQs.length} سؤال في بنك المعلم!`
+            : msg,
+        });
+      }
     } catch (err: any) {
       console.error(err);
       setChunks((prev) =>
@@ -453,10 +518,11 @@ export default function AdminUploadPDFPage() {
               }}
               className="w-full px-4 py-2.5 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
             >
-              <option value={3}>3 صفحات (أقصى أمان للكتب الممسوحة ضوئياً بجودة فائقة 100MB+)</option>
-              <option value={5}>5 صفحات (موصى به لكتب الشرح والمذكرات الكبيرة)</option>
-              <option value={10}>10 صفحات (للكتب العادية والصغيرة)</option>
-              <option value={15}>15 صفحة (للمذكرات الخفيفة والنصوص الرقمية)</option>
+              <option value={2}>صفحتين (أقصى أمان وسرعة للكتب المصورة والضخمة جداً 100MB+)</option>
+              <option value={3}>3 صفحات (موصى به - متوازن وفائق الدقة للكتب الكبيرة)</option>
+              <option value={5}>5 صفحات (للكتب العادية والمتوسطة)</option>
+              <option value={10}>10 صفحات (للكتب الخفيفة والصغيرة)</option>
+              <option value={15}>15 صفحة (للمذكرات والنصوص الرقمية الخفيفة)</option>
             </select>
           </div>
         </div>
@@ -499,33 +565,66 @@ export default function AdminUploadPDFPage() {
               </p>
             </div>
 
-            {currentChunkIndex < chunks.length ? (
-              <button
-                type="button"
-                onClick={() => processChunk(currentChunkIndex)}
-                disabled={isProcessing}
-                className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-sm rounded-xl shadow-md shadow-blue-600/20 transition flex items-center gap-2"
-              >
-                {isProcessing ? (
-                  <>
-                    <Loader2 className="w-4 h-4 animate-spin" />
-                    <span>جاري استخراج الجزء {currentChunkIndex + 1}...</span>
-                  </>
-                ) : (
-                  <>
-                    <Play className="w-4 h-4 fill-white" />
-                    <span>
-                      {chunks[currentChunkIndex]?.status === 'error' ? 'إعادة محاولة' : 'ابدأ استخراج'} الجزء {currentChunkIndex + 1} (ص {chunks[currentChunkIndex]?.startPage} - {chunks[currentChunkIndex]?.endPage})
-                    </span>
-                  </>
-                )}
-              </button>
-            ) : (
-              <div className="flex items-center gap-2 text-emerald-600 font-bold bg-emerald-50 px-4 py-2 rounded-xl border border-emerald-200 text-sm">
-                <Check className="w-4 h-4" />
-                <span>اكتمل استخراج جميع أجزاء الكتاب بنجاح!</span>
-              </div>
-            )}
+            <div className="flex items-center gap-3">
+              <label className="flex items-center gap-2 cursor-pointer bg-slate-50 px-3 py-1.5 rounded-xl border border-slate-200 text-xs font-semibold text-slate-700 select-none hover:bg-slate-100 transition">
+                <input
+                  type="checkbox"
+                  checked={autoPlay}
+                  onChange={(e) => setAutoPlay(e.target.checked)}
+                  className="rounded text-blue-600 focus:ring-blue-500 w-4 h-4 cursor-pointer"
+                />
+                <span>متابعة تلقائية للأجزاء التالية (Auto)</span>
+              </label>
+
+              {currentChunkIndex < chunks.length ? (
+                <div className="flex items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => processChunk(currentChunkIndex)}
+                    disabled={isProcessing}
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-500 disabled:opacity-50 text-white font-bold text-sm rounded-xl shadow-md shadow-blue-600/20 transition flex items-center gap-2"
+                  >
+                    {isProcessing ? (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin" />
+                        <span>جاري معالجة الجزء {currentChunkIndex + 1}...</span>
+                      </>
+                    ) : (
+                      <>
+                        <Play className="w-4 h-4 fill-white" />
+                        <span>
+                          {chunks[currentChunkIndex]?.status === 'error' ? 'إعادة محاولة' : 'ابدأ استخراج'} الجزء {currentChunkIndex + 1} (ص {chunks[currentChunkIndex]?.startPage} - {chunks[currentChunkIndex]?.endPage})
+                        </span>
+                      </>
+                    )}
+                  </button>
+
+                  {chunks[currentChunkIndex]?.status === 'error' && (
+                    <button
+                      type="button"
+                      disabled={isProcessing}
+                      onClick={() => {
+                        const nextIdx = currentChunkIndex + 1;
+                        if (nextIdx < chunks.length) {
+                          setCurrentChunkIndex(nextIdx);
+                          if (autoPlay) {
+                            setTimeout(() => processChunk(nextIdx), 500);
+                          }
+                        }
+                      }}
+                      className="px-3.5 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 font-semibold text-xs rounded-xl border border-slate-300 transition"
+                    >
+                      تخطي للجزء التالي ⏭️
+                    </button>
+                  )}
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-emerald-600 font-bold bg-emerald-50 px-4 py-2 rounded-xl border border-emerald-200 text-sm">
+                  <Check className="w-4 h-4" />
+                  <span>اكتمل استخراج جميع أجزاء الكتاب بنجاح!</span>
+                </div>
+              )}
+            </div>
           </div>
 
           {/* Chunks List */}
