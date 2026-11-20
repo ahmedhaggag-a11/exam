@@ -91,45 +91,65 @@ export default function AdminUploadPDFPage() {
   const supabase = createClient();
 
   // Helper to map and rebuild chunks with confirmed sections
+  // ✅ Core Fix: If sections have realistic page ranges, build ONE chunk PER LESSON
+  //    so each lesson's questions are NEVER mixed with another lesson's pages.
+  //    Fallback to fixed-size chunking only if no page info is available.
   const rebuildChunksWithSections = (sections: any[], pages: number, activeChunkSize: number) => {
     if (pages <= 0) return;
     const mappedChunks: ChunkInfo[] = [];
-    let cIdx = 0;
-    const hasRealisticPages = sections.some((s: any) => (s.endPage || 0) > 1 && s.startPage !== s.endPage);
 
-    for (let i = 1; i <= pages; i += activeChunkSize) {
-      const start = i;
-      const end = Math.min(i + activeChunkSize - 1, pages);
+    const hasRealisticPages = sections.some(
+      (s: any) => (s.endPage || 0) > 1 && (s.endPage || 0) > (s.startPage || 1)
+    );
 
-      let matchedSec: any = null;
-      if (hasRealisticPages) {
-        matchedSec = sections.find((s: any) => start >= s.startPage && start <= s.endPage)
-          || sections.find((s: any) => end >= s.startPage && end <= s.endPage)
-          || sections.find((s: any) => (start <= s.startPage && end >= s.endPage));
+    if (hasRealisticPages) {
+      // 🎯 LESSON-BASED chunking: 1 chunk per lesson, pages are exact lesson boundaries
+      let cIdx = 0;
+      for (const sec of sections) {
+        const start = Math.max(1, sec.startPage || 1);
+        const end = Math.min(pages, sec.endPage || pages);
+        if (start > end) continue;
+
+        // If a lesson spans many pages (>8), split internally to stay under Gemini limits
+        const MAX_PAGES_PER_CALL = 8;
+        for (let p = start; p <= end; p += MAX_PAGES_PER_CALL) {
+          const chunkEnd = Math.min(p + MAX_PAGES_PER_CALL - 1, end);
+          mappedChunks.push({
+            index: cIdx,
+            startPage: p,
+            endPage: chunkEnd,
+            status: 'pending',
+            chapter: sec.chapter,
+            lesson: sec.lesson,
+            label: `${sec.chapter} › ${sec.lesson}`,
+          });
+          cIdx++;
+        }
       }
-
-      if (!matchedSec && sections.length > 0) {
-        // Distribute proportionally across confirmed lessons
+    } else {
+      // 📄 PROPORTIONAL fallback: no page ranges known — distribute proportionally
+      let cIdx = 0;
+      for (let i = 1; i <= pages; i += activeChunkSize) {
+        const start = i;
+        const end = Math.min(i + activeChunkSize - 1, pages);
         const secIdx = Math.min(
           Math.floor(((start - 1) / pages) * sections.length),
           sections.length - 1
         );
-        matchedSec = sections[secIdx];
+        const matchedSec = sections[secIdx];
+        const chName = matchedSec?.chapter || selectedSubject || 'الوحدة الأولى';
+        const lesName = matchedSec?.lesson || 'الدرس الأول';
+        mappedChunks.push({
+          index: cIdx,
+          startPage: start,
+          endPage: end,
+          status: 'pending',
+          chapter: chName,
+          lesson: lesName,
+          label: `${chName} › ${lesName}`,
+        });
+        cIdx++;
       }
-
-      const chName = matchedSec?.chapter || selectedSubject || 'الوحدة الأولى';
-      const lesName = matchedSec?.lesson || 'الدرس الأول';
-
-      mappedChunks.push({
-        index: cIdx,
-        startPage: start,
-        endPage: end,
-        status: 'pending',
-        chapter: chName,
-        lesson: lesName,
-        label: `${chName} › ${lesName}`,
-      });
-      cIdx++;
     }
 
     setChunks(mappedChunks);
@@ -353,43 +373,12 @@ export default function AdminUploadPDFPage() {
         throw new Error(result.error || 'لم يتم اكتشاف أي هيكل');
       }
 
-      // Convert sections into safe lightweight physical chunks (3-5 pages each)
-      // Every physical chunk is mapped to its real educational Unit & Lesson!
+      // ✅ Build lesson-based chunks using rebuildChunksWithSections (same logic, 1 chunk per lesson)
       setBookSections(result.sections);
-
-      const activeChunkSize = chunkSize > 0 ? chunkSize : 4;
-      const mappedChunks: ChunkInfo[] = [];
-      let cIdx = 0;
-      for (let i = 1; i <= totalPages; i += activeChunkSize) {
-        const start = i;
-        const end = Math.min(i + activeChunkSize - 1, totalPages);
-        const matchedSec = result.sections.find((s: any) => start >= s.startPage && start <= s.endPage)
-          || result.sections.find((s: any) => end >= s.startPage && end <= s.endPage)
-          || result.sections.find((s: any) => (start <= s.startPage && end >= s.endPage))
-          || result.sections[0];
-
-        const chName = matchedSec?.chapter || selectedSubject || 'الوحدة الأولى';
-        const lesName = matchedSec?.lesson || 'الدرس الأول';
-
-        mappedChunks.push({
-          index: cIdx,
-          startPage: start,
-          endPage: end,
-          status: 'pending',
-          chapter: chName,
-          lesson: lesName,
-          label: `${chName} › ${lesName}`,
-        });
-        cIdx++;
-      }
-
-      setChunks(mappedChunks);
-      setCurrentChunkIndex(0);
-      setTotalExtractedQuestions(0);
-      setStructureMode('smart');
+      rebuildChunksWithSections(result.sections, totalPages, chunkSize > 0 ? chunkSize : 4);
       setStatusMsg({
         type: 'success',
-        text: `✨ تم التعرف على هيكل الكتاب بالكامل (${result.sections.length} فصل ودرس)! وتم توزيع صفحات الكتاب الـ (${totalPages}) على (${mappedChunks.length} دفعة معالجة سريعة وخفيفة كل منها ${activeChunkSize} صفحات فقط) لضمان التحميل السلس والأمان التام.`,
+        text: `✨ تم التعرف على هيكل الكتاب بالكامل (${result.sections.length} درس)! وتم توزيع الصفحات على دفعات مطابقة لحدود كل درس بدقة تامة.`,
       });
     } catch (err: any) {
       console.error('Structure analysis failed:', err);

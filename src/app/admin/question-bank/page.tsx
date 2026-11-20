@@ -74,15 +74,24 @@ export default function AdminQuestionBankPage() {
         setSources(sourcesData);
       }
 
-      // 3. Load all questions with choices
-      const { data: questionsData } = await supabase
-        .from('questions')
-        .select('*, choices:question_choices(*)')
-        .order('created_at', { ascending: false });
+      // 3. Load all questions with choices using pagination (to bypass 1000 row PostgREST limit)
+      let allQuestions: Question[] = [];
+      let page = 0;
+      const pageSize = 1000;
+      while (true) {
+        const { data: questionsData, error: qErr } = await supabase
+          .from('questions')
+          .select('*, choices:question_choices(*)')
+          .order('created_at', { ascending: false })
+          .range(page * pageSize, (page + 1) * pageSize - 1);
 
-      if (questionsData) {
-        setQuestions(questionsData as Question[]);
+        if (qErr || !questionsData || questionsData.length === 0) break;
+        allQuestions = allQuestions.concat(questionsData as Question[]);
+        if (questionsData.length < pageSize) break;
+        page++;
       }
+
+      setQuestions(allQuestions);
 
       setLoading(false);
     }
