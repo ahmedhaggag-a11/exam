@@ -190,7 +190,8 @@ export default function AdminUploadPDFPage() {
       try {
         setStatusMsg({ type: 'success', text: 'جاري فحص صفحات المستند...' });
         const arrayBuffer = await f.arrayBuffer();
-        const pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        // Clone buffer via Uint8Array to prevent worker from detaching original File buffer
+        const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
         const pages = pdfDoc.numPages;
         setTotalPages(pages);
 
@@ -475,15 +476,17 @@ export default function AdminUploadPDFPage() {
       // 2. Prepare chunk payload - ALWAYS render as compressed JPEGs
       //    This keeps every request well under Vercel's 4MB body limit,
       //    even for large high-res scans with many pages.
-      //    Scale 1.4 gives Gemini enough resolution; quality 0.75 keeps each page ~150-250KB.
+      //    Clone the buffer to prevent worker detachment.
       const fullBuffer = await file.arrayBuffer();
+      const pdfBytesCopy = new Uint8Array(fullBuffer.slice(0));
       let chunkPayload: { pdfBase64?: string; imagesBase64?: string[] } = {};
+      let sharedPdfJsDoc: any = null;
 
       try {
-        const pdfJsDoc = await pdfjsLib.getDocument({ data: fullBuffer }).promise;
+        sharedPdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytesCopy }).promise;
         const images: string[] = [];
         for (let p = chunk.startPage; p <= chunk.endPage; p++) {
-          const page = await pdfJsDoc.getPage(p);
+          const page = await sharedPdfJsDoc.getPage(p);
           const viewport = page.getViewport({ scale: 1.4 });
           const canvas = document.createElement('canvas');
           canvas.width = viewport.width;
@@ -494,9 +497,9 @@ export default function AdminUploadPDFPage() {
         }
         chunkPayload = { imagesBase64: images };
       } catch (renderErr) {
-        // Ultimate fallback: try PDF-lib slice if canvas rendering fails
+        // Fallback: try PDF-lib slice if canvas rendering fails
         console.warn('Canvas render failed, falling back to PDF slice:', renderErr);
-        const originalPdfDoc = await PDFDocument.load(fullBuffer);
+        const originalPdfDoc = await PDFDocument.load(new Uint8Array(fullBuffer.slice(0)));
         const subPdfDoc = await PDFDocument.create();
         const pageIndices: number[] = [];
         for (let p = chunk.startPage - 1; p < chunk.endPage; p++) pageIndices.push(p);
@@ -526,20 +529,19 @@ export default function AdminUploadPDFPage() {
 
       const extractedQs = Array.isArray(extractRes.questions) ? extractRes.questions : [];
 
-      // 4. Crop images if any
+      // 4. Crop images if any (reusing sharedPdfJsDoc safely without re-parsing buffer)
       const questionsWithImages = extractedQs.filter(
         (q: any) => q.has_image && q.image_page_number && q.image_box
       );
 
-      if (questionsWithImages.length > 0) {
-        const pdfJsDoc = await pdfjsLib.getDocument({ data: fullBuffer }).promise;
+      if (questionsWithImages.length > 0 && sharedPdfJsDoc) {
         for (let i = 0; i < extractedQs.length; i++) {
           const q = extractedQs[i];
           if (q.has_image && q.image_page_number && q.image_box) {
             // Absolute page number in the original book
             const absPageNum = chunk.startPage + (q.image_page_number - 1);
-            const pageNum = Math.min(Math.max(1, absPageNum), pdfJsDoc.numPages);
-            const base64Img = await cropImageFromPdf(pdfJsDoc, pageNum, q.image_box);
+            const pageNum = Math.min(Math.max(1, absPageNum), sharedPdfJsDoc.numPages);
+            const base64Img = await cropImageFromPdf(sharedPdfJsDoc, pageNum, q.image_box);
             if (base64Img) {
               const url = await uploadImageFromBase64(base64Img, selectedTeacherId);
               if (url) q.final_image_url = url;
