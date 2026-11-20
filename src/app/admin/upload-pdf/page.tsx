@@ -147,20 +147,51 @@ export default function AdminUploadPDFPage() {
     }
   };
 
-  // Smart structure analysis: render first pages as JPEG and ask Gemini to detect TOC
+  // Smart structure analysis: render strategic pages from throughout the PDF
+  // so that multi-part books (كتاب أول + ثاني + اختبارات شاملة) are all detected
   const handleAnalyzeStructure = async () => {
     if (!file || totalPages === 0) return;
     setIsAnalyzing(true);
-    setStatusMsg({ type: 'success', text: '🔍 جاري تحليل فهرس الكتاب واكتشاف الفصول والدروس ذكياً...' });
+    setStatusMsg({ type: 'success', text: '🔍 جاري تحليل هيكل الكتاب كاملاً (قد يستغرق ثوانٍ أطول للكتب المجمّعة)...' });
 
     try {
       const fullBuffer = await file.arrayBuffer();
       const pdfJsDoc = await pdfjsLib.getDocument({ data: fullBuffer }).promise;
 
-      // Render first 15 pages (where TOC usually is) as compressed JPEGs
-      const tocPageCount = Math.min(15, totalPages);
+      // Build a set of "candidate TOC pages" covering the full document:
+      // - First 10 pages (TOC of part 1 or whole book)
+      // - 2–3 pages around 25%, 50%, 75% of the book (TOC of part 2, part 3, exams section)
+      // - Last 5 pages (sometimes TOC appears at end in Arabic books)
+      const candidatePages = new Set<number>();
+      const addRange = (start: number, end: number) => {
+        for (let p = Math.max(1, start); p <= Math.min(totalPages, end); p++) {
+          candidatePages.add(p);
+        }
+      };
+      addRange(1, 10); // start of book
+      if (totalPages > 30) {
+        const q1 = Math.floor(totalPages * 0.25);
+        addRange(q1 - 2, q1 + 3); // around 25%
+      }
+      if (totalPages > 60) {
+        const mid = Math.floor(totalPages * 0.5);
+        addRange(mid - 2, mid + 3); // around 50%
+      }
+      if (totalPages > 90) {
+        const q3 = Math.floor(totalPages * 0.75);
+        addRange(q3 - 2, q3 + 3); // around 75%
+      }
+      addRange(totalPages - 4, totalPages); // end of book
+
+      const sortedPages = Array.from(candidatePages).sort((a, b) => a - b);
+
+      setStatusMsg({ type: 'success', text: `🔍 جاري استخراج ${sortedPages.length} صفحة مفتاحية من طول الملف للكشف عن كل الأجزاء والفصول...` });
+
+      // Render candidate pages as compressed JPEGs
       const images: string[] = [];
-      for (let p = 1; p <= tocPageCount; p++) {
+      // Also track which physical pages were rendered (to tell Gemini)
+      const pageLabels: number[] = [];
+      for (const p of sortedPages) {
         const page = await pdfJsDoc.getPage(p);
         const viewport = page.getViewport({ scale: 1.2 });
         const canvas = document.createElement('canvas');
@@ -169,10 +200,11 @@ export default function AdminUploadPDFPage() {
         const ctx = canvas.getContext('2d');
         await page.render({ canvasContext: ctx, viewport }).promise;
         images.push(canvas.toDataURL('image/jpeg', 0.75).split(',')[1]);
+        pageLabels.push(p);
       }
 
       const result = await analyzeBookStructureAction(
-        { imagesBase64: images },
+        { imagesBase64: images, pageLabels },
         totalPages
       );
 
