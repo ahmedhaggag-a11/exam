@@ -15,9 +15,16 @@ export default function TeacherSourcesPage() {
   useEffect(() => {
     async function fetchSources() {
       setLoading(true);
+      const { data: { user } } = await supabase.auth.getUser();
+      if (!user) {
+        setLoading(false);
+        return;
+      }
+
       const { data } = await supabase
         .from('sources')
         .select('*')
+        .eq('teacher_id', user.id)
         .order('created_at', { ascending: false });
 
       if (data) {

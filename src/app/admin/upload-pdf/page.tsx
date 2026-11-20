@@ -169,13 +169,6 @@ export default function AdminUploadPDFPage() {
         .eq('role', 'teacher');
       if (data && data.length > 0) {
         setTeachers(data);
-        setSelectedTeacherId(data[0].id);
-        if (data[0].subjects && data[0].subjects.length > 0) {
-          setSelectedSubject(data[0].subjects[0]);
-        }
-        if (data[0].grades && data[0].grades.length > 0) {
-          setSelectedGrade(data[0].grades[0]);
-        }
       }
     }
     loadTeachers();
@@ -632,7 +625,7 @@ export default function AdminUploadPDFPage() {
       {/* Basic Settings */}
       <div className="bg-white p-6 rounded-2xl border border-slate-200 shadow-sm space-y-5">
         <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-1.5">اختر المعلم المستهدف</label>
+          <label className="block text-xs font-semibold text-slate-700 mb-1.5">اختر المعلم المستهدف لهذا الكتاب</label>
           <select
             disabled={isProcessing || chunks.some(c => c.status === 'completed')}
             value={selectedTeacherId}
@@ -644,6 +637,7 @@ export default function AdminUploadPDFPage() {
             }}
             className="w-full px-4 py-3 bg-slate-50 border border-slate-300 rounded-xl text-sm font-medium focus:ring-2 focus:ring-blue-500 outline-none"
           >
+            <option value="">-- اختر المعلم الذي سينزل له هذا الكتاب فقط --</option>
             {teachers.map((t) => (
               <option key={t.id} value={t.id}>
                 {t.full_name} ({t.email})
