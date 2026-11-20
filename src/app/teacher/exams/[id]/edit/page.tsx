@@ -4,6 +4,7 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
+import { ArrowUp, ArrowDown, Shuffle, BookOpen, ArrowUpDown } from 'lucide-react';
 
 interface ExamModel {
   id: string;
@@ -159,6 +160,50 @@ export default function ExamEditPage() {
     });
   }
 
+  async function moveQuestionInModel(fromIdx: number, direction: 'up' | 'down') {
+    const toIdx = direction === 'up' ? fromIdx - 1 : fromIdx + 1;
+    const currentModel = models[activeModel];
+    if (!currentModel || toIdx < 0 || toIdx >= currentModel.questions_order.length) return;
+
+    const newOrder = [...currentModel.questions_order];
+    const temp = newOrder[fromIdx];
+    newOrder[fromIdx] = newOrder[toIdx];
+    newOrder[toIdx] = temp;
+
+    const updatedModels = [...models];
+    updatedModels[activeModel] = { ...currentModel, questions_order: newOrder };
+    setModels(updatedModels);
+
+    await supabase.from('exam_models').update({ questions_order: newOrder }).eq('id', currentModel.id);
+  }
+
+  async function reorderCurrentModel(strategy: 'shuffle' | 'by_chapter' | 'easy_to_hard' | 'type_mcq_first') {
+    const currentModel = models[activeModel];
+    if (!currentModel || !currentModel.questions_order?.length) return;
+
+    const qs = currentModel.questions_order.map(qid => questions[qid]).filter(Boolean);
+    let sorted: Question[] = [];
+
+    if (strategy === 'shuffle') {
+      sorted = [...qs].sort(() => Math.random() - 0.5);
+    } else if (strategy === 'by_chapter') {
+      sorted = [...qs].sort((a, b) => (a.chapter || '').localeCompare(b.chapter || '', 'ar'));
+    } else if (strategy === 'easy_to_hard') {
+      const diff = { easy: 0, medium: 1, hard: 2 };
+      sorted = [...qs].sort((a: any, b: any) => ((diff as any)[a.difficulty] ?? 1) - ((diff as any)[b.difficulty] ?? 1));
+    } else if (strategy === 'type_mcq_first') {
+      const typeO = { mcq: 0, true_false: 1, essay: 2 };
+      sorted = [...qs].sort((a: any, b: any) => ((typeO as any)[a.question_type] ?? 3) - ((typeO as any)[b.question_type] ?? 3));
+    }
+
+    const newOrder = sorted.map(q => q.id);
+    const updatedModels = [...models];
+    updatedModels[activeModel] = { ...currentModel, questions_order: newOrder };
+    setModels(updatedModels);
+
+    await supabase.from('exam_models').update({ questions_order: newOrder }).eq('id', currentModel.id);
+  }
+
   async function updateStatus(status: string) {
     setSaving(true);
     await supabase.from('exams').update({ status }).eq('id', id);
@@ -225,10 +270,51 @@ export default function ExamEditPage() {
 
       {/* Questions list */}
       <div className="bg-white rounded-xl shadow p-5">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="font-semibold text-gray-700">
-            {currentModel ? currentModel.model_name : 'الأسئلة'} — {modelQuestions.length} سؤال
-          </h2>
+        <div className="flex flex-col sm:flex-row sm:items-center justify-between mb-4 gap-3 pb-3 border-b border-gray-100">
+          <div>
+            <h2 className="font-semibold text-gray-800 text-base">
+              {currentModel ? currentModel.model_name : 'الأسئلة'} — {modelQuestions.length} سؤال
+            </h2>
+            <p className="text-xs text-gray-400 mt-0.5">يمكنك تغيير ترتيب الأسئلة في هذا النموذج أو تحريك أي سؤال للأعلى والأسفل.</p>
+          </div>
+
+          {/* Quick reorder buttons */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <span className="text-xs font-bold text-gray-500 flex items-center gap-1">
+              <ArrowUpDown className="w-3.5 h-3.5 text-blue-600" />
+              <span>ترتيب سريع:</span>
+            </span>
+            <button
+              onClick={() => reorderCurrentModel('shuffle')}
+              className="px-2.5 py-1 text-xs font-bold border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-700 flex items-center gap-1 transition"
+              title="خلط عشوائي لمنع الغش"
+            >
+              <Shuffle className="w-3 h-3 text-purple-600" />
+              <span>عشوائي</span>
+            </button>
+            <button
+              onClick={() => reorderCurrentModel('by_chapter')}
+              className="px-2.5 py-1 text-xs font-bold border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-700 flex items-center gap-1 transition"
+              title="ترتيب حسب الفصول"
+            >
+              <BookOpen className="w-3 h-3 text-blue-600" />
+              <span>حسب الفصول</span>
+            </button>
+            <button
+              onClick={() => reorderCurrentModel('easy_to_hard')}
+              className="px-2.5 py-1 text-xs font-bold border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-700 transition"
+              title="من السهل للصعب"
+            >
+              🟢 أسهل أولاً
+            </button>
+            <button
+              onClick={() => reorderCurrentModel('type_mcq_first')}
+              className="px-2.5 py-1 text-xs font-bold border border-gray-200 rounded-lg hover:bg-gray-50 text-gray-700 transition"
+              title="الاختياري أولاً"
+            >
+              📝 اختياري أولاً
+            </button>
+          </div>
         </div>
 
         <div className="space-y-3">
@@ -289,6 +375,22 @@ export default function ExamEditPage() {
                 </div>
 
                 <div className="flex flex-col gap-1 shrink-0">
+                  <button
+                    disabled={idx === 0}
+                    onClick={() => moveQuestionInModel(idx, 'up')}
+                    className="p-1.5 border border-gray-200 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-gray-50 text-xs transition disabled:opacity-30 disabled:pointer-events-none"
+                    title="تحريك لأعلى"
+                  >
+                    <ArrowUp className="w-3.5 h-3.5" />
+                  </button>
+                  <button
+                    disabled={idx === modelQuestions.length - 1}
+                    onClick={() => moveQuestionInModel(idx, 'down')}
+                    className="p-1.5 border border-gray-200 rounded-lg text-gray-500 hover:text-blue-600 hover:bg-gray-50 text-xs transition disabled:opacity-30 disabled:pointer-events-none"
+                    title="تحريك لأسفل"
+                  >
+                    <ArrowDown className="w-3.5 h-3.5" />
+                  </button>
                   <button onClick={() => startEdit(q)} className="p-1.5 border border-gray-200 rounded-lg text-gray-500 hover:bg-gray-50 text-xs transition" title="تعديل السؤال">✏️</button>
                   <button onClick={() => removeQuestion(q.id)} className="p-1.5 border border-red-100 rounded-lg text-red-500 hover:bg-red-50 text-xs transition" title="حذف السؤال من الامتحان">🗑️</button>
                 </div>

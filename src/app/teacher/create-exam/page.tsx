@@ -24,6 +24,10 @@ import {
   CheckSquare,
   Square,
   Filter,
+  ArrowUp,
+  ArrowDown,
+  ArrowUpDown,
+  ListOrdered,
 } from 'lucide-react';
 
 interface Subject { id: string; name: string; }
@@ -46,6 +50,17 @@ interface Question {
 }
 
 const STEPS = ['بيانات ومصادر الامتحان', 'الفصول والأعداد والصعوبة', 'نماذج وخيارات الترتيب', 'توليد الامتحان', 'مراجعة وتعديل وحفظ'];
+
+type OrderStrategy = 'shuffle' | 'by_chapter' | 'easy_to_hard' | 'hard_to_easy' | 'type_mcq_first';
+
+function seededShuffle<T>(arr: T[], seed: string): T[] {
+  let s = 0;
+  for (let i = 0; i < seed.length; i++) s = (s * 31 + seed.charCodeAt(i)) >>> 0;
+  const rng = () => { s = (s * 1664525 + 1013904223) >>> 0; return s / 4294967296; };
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) { const j = Math.floor(rng() * (i + 1)); [a[i], a[j]] = [a[j], a[i]]; }
+  return a;
+}
 
 export default function CreateExamPage() {
   const router = useRouter();
@@ -94,6 +109,36 @@ export default function CreateExamPage() {
   const [shuffleChoices, setShuffleChoices] = useState(true);
   const [shuffleNumbers, setShuffleNumbers] = useState(true);
   const [template] = useState('classic');
+
+  // ── Per-model question order strategy
+  const [perModelOrder, setPerModelOrder] = useState<OrderStrategy[]>(['shuffle', 'shuffle', 'shuffle', 'shuffle']);
+
+  function setModelOrder(modelIndex: number, strategy: OrderStrategy) {
+    setPerModelOrder(prev => prev.map((s, i) => i === modelIndex ? strategy : s));
+  }
+
+  function applyOrderStrategy(questions: any[], strategy: OrderStrategy, modelCode: string): any[] {
+    switch (strategy) {
+      case 'by_chapter':
+        return [...questions].sort((a, b) => (a.chapter || a.topic || '').localeCompare(b.chapter || b.topic || '', 'ar'));
+      case 'easy_to_hard': {
+        const diff = { easy: 0, medium: 1, hard: 2 };
+        return [...questions].sort((a, b) => (diff[a.difficulty as keyof typeof diff] ?? 1) - (diff[b.difficulty as keyof typeof diff] ?? 1));
+      }
+      case 'hard_to_easy': {
+        const diff = { easy: 0, medium: 1, hard: 2 };
+        return [...questions].sort((a, b) => (diff[b.difficulty as keyof typeof diff] ?? 1) - (diff[a.difficulty as keyof typeof diff] ?? 1));
+      }
+      case 'type_mcq_first':
+        return [...questions].sort((a, b) => {
+          const order = { mcq: 0, true_false: 1, essay: 2 };
+          return (order[a.question_type as keyof typeof order] ?? 3) - (order[b.question_type as keyof typeof order] ?? 3);
+        });
+      case 'shuffle':
+      default:
+        return seededShuffle(questions, `order_${modelCode}_${questions.length}`);
+    }
+  }
 
   // ── Step 4 — Grading Mode (تخصيص الدرجات)
   const [gradingMode, setGradingMode] = useState<'equal' | 'custom'>('equal');
@@ -194,6 +239,12 @@ export default function CreateExamPage() {
       shuffleNumbers
     );
 
+    // Apply per-model order strategy
+    models = models.map((m, i) => ({
+      ...m,
+      questions: applyOrderStrategy(m.questions, perModelOrder[i] ?? 'shuffle', m.model_code),
+    }));
+
     if (gradingMode === 'equal' && selectedQs.length > 0) {
       const baseMark = Math.max(1, Math.round((totalMark / selectedQs.length) * 10) / 10);
       models = models.map(m => ({
@@ -293,6 +344,12 @@ export default function CreateExamPage() {
         shuffleNumbers
       );
 
+      // Apply per-model order strategy
+      models = models.map((m, i) => ({
+        ...m,
+        questions: applyOrderStrategy(m.questions, perModelOrder[i] ?? 'shuffle', m.model_code),
+      }));
+
       // Apply initial equal marks distribution if equal mode
       if (gradingMode === 'equal' && selectedQs.length > 0) {
         const baseMark = Math.max(1, Math.round((totalMark / selectedQs.length) * 10) / 10);
@@ -353,6 +410,28 @@ export default function CreateExamPage() {
     if (!currentModel) return;
     const updated = [...generatedModels];
     updated[activeModel] = { ...currentModel, questions: currentModel.questions.filter((_: any, i: number) => i !== idx) };
+    setGeneratedModels(updated);
+  }
+
+  function handleMoveQuestion(fromIndex: number, direction: 'up' | 'down') {
+    const toIndex = direction === 'up' ? fromIndex - 1 : fromIndex + 1;
+    const currentModel = generatedModels[activeModel];
+    if (!currentModel?.questions || toIndex < 0 || toIndex >= currentModel.questions.length) return;
+    const updated = [...generatedModels];
+    const qs = [...currentModel.questions];
+    const temp = qs[fromIndex];
+    qs[fromIndex] = qs[toIndex];
+    qs[toIndex] = temp;
+    updated[activeModel] = { ...currentModel, questions: qs };
+    setGeneratedModels(updated);
+  }
+
+  function handleApplyOrderToCurrentModel(strategy: OrderStrategy) {
+    const currentModel = generatedModels[activeModel];
+    if (!currentModel?.questions) return;
+    const sorted = applyOrderStrategy(currentModel.questions, strategy, `${currentModel.model_code}_${Date.now()}`);
+    const updated = [...generatedModels];
+    updated[activeModel] = { ...currentModel, questions: sorted };
     setGeneratedModels(updated);
   }
 
@@ -1001,6 +1080,51 @@ export default function CreateExamPage() {
             </label>
           </div>
 
+          {/* Per-model question order customization */}
+          <div className="space-y-3 p-4 bg-gradient-to-r from-blue-50/70 to-indigo-50/70 rounded-2xl border border-blue-200">
+            <div className="flex items-center gap-2 mb-1">
+              <ListOrdered className="w-4 h-4 text-blue-600" />
+              <p className="text-xs font-black text-slate-800">تخصيص طريقة ترتيب الأسئلة لكل نموذج في ورقة الامتحان:</p>
+            </div>
+            <p className="text-[11px] text-slate-500 mb-2">
+              يمكنك اختيار تسلسل وترتيب مختلف للأسئلة لكل نموذج على حدة (مثلاً نموذج مرتب حسب الدروس، ونموذج عشوائي، ونموذج من الأسهل للأصعب):
+            </p>
+
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              {Array.from({ length: modelsCount }).map((_, mIdx) => {
+                const modelName = ['أ', 'ب', 'ج', 'د'][mIdx];
+                const currentStrategy = perModelOrder[mIdx] || 'shuffle';
+                return (
+                  <div key={mIdx} className="bg-white p-3 rounded-xl border border-blue-100 shadow-xs space-y-2">
+                    <div className="flex items-center justify-between">
+                      <span className="text-xs font-black text-blue-900 bg-blue-100/70 px-2.5 py-1 rounded-lg">
+                        نموذج ({modelName})
+                      </span>
+                      <span className="text-[10px] text-slate-400 font-bold">
+                        {currentStrategy === 'shuffle' ? '🔀 عشوائي' :
+                         currentStrategy === 'by_chapter' ? '📖 حسب الدروس' :
+                         currentStrategy === 'easy_to_hard' ? '🟢 أسهل فأصعب' :
+                         currentStrategy === 'hard_to_easy' ? '🔴 أصعب فأسهل' : '📝 مقالي أخيراً'}
+                      </span>
+                    </div>
+
+                    <select
+                      value={currentStrategy}
+                      onChange={e => setModelOrder(mIdx, e.target.value as OrderStrategy)}
+                      className="w-full bg-slate-50 border border-slate-200 rounded-lg px-2.5 py-1.5 text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                    >
+                      <option value="shuffle">🔀 ترتيب عشوائي / ملخبط (لمنع الغش)</option>
+                      <option value="by_chapter">📖 مرتب حسب الفصول والدروس (منهجي)</option>
+                      <option value="easy_to_hard">🟢 ترتيب تدريجي (من الأسهل إلى الأصعب)</option>
+                      <option value="hard_to_easy">🔴 ترتيب عكسي (من الأصعب إلى الأسهل)</option>
+                      <option value="type_mcq_first">📝 حسب نوع السؤال (اختيار من متعدد ثم مقالي)</option>
+                    </select>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+
           <div className="flex justify-between pt-3 border-t border-slate-100">
             <button onClick={() => setStep(1)} className="px-5 py-2.5 border border-slate-300 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition">→ السابق</button>
             <button
@@ -1160,6 +1284,61 @@ export default function CreateExamPage() {
             </div>
           </div>
 
+          {/* Active Model Reordering Toolbar */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2 p-3 bg-slate-50 border border-slate-200 rounded-xl">
+            <div className="flex items-center gap-2">
+              <ArrowUpDown className="w-4 h-4 text-blue-600" />
+              <span className="text-xs font-black text-slate-700">
+                ترتيب أسئلة نموذج ({['أ', 'ب', 'ج', 'د'][activeModel]}):
+              </span>
+            </div>
+            <div className="flex items-center gap-1.5 flex-wrap">
+              <span className="text-[11px] text-slate-500 font-bold">إعادة ترتيب سريعة:</span>
+              <button
+                type="button"
+                onClick={() => handleApplyOrderToCurrentModel('shuffle')}
+                className="px-2.5 py-1 bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 rounded-lg text-[11px] font-bold transition flex items-center gap-1"
+                title="خلط عشوائي لمنع الغش"
+              >
+                <Shuffle className="w-3 h-3 text-purple-600" />
+                <span>عشوائي</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApplyOrderToCurrentModel('by_chapter')}
+                className="px-2.5 py-1 bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 rounded-lg text-[11px] font-bold transition flex items-center gap-1"
+                title="ترتيب تسلسلي حسب الفصول والدروس"
+              >
+                <BookOpen className="w-3 h-3 text-blue-600" />
+                <span>حسب الفصول</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApplyOrderToCurrentModel('easy_to_hard')}
+                className="px-2.5 py-1 bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 rounded-lg text-[11px] font-bold transition flex items-center gap-1"
+                title="من الأسهل للأصعب"
+              >
+                <span>🟢 الأسهل أولاً</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApplyOrderToCurrentModel('hard_to_easy')}
+                className="px-2.5 py-1 bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 rounded-lg text-[11px] font-bold transition flex items-center gap-1"
+                title="من الأصعب للأسهل"
+              >
+                <span>🔴 الأصعب أولاً</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => handleApplyOrderToCurrentModel('type_mcq_first')}
+                className="px-2.5 py-1 bg-white hover:bg-blue-50 text-slate-700 hover:text-blue-700 border border-slate-200 rounded-lg text-[11px] font-bold transition flex items-center gap-1"
+                title="الاختياري أولاً ثم المقالي"
+              >
+                <span>📝 اختياري ثم مقالي</span>
+              </button>
+            </div>
+          </div>
+
           {/* Questions Review List */}
           <div className="border border-slate-200 rounded-2xl divide-y divide-slate-100 max-h-[550px] overflow-y-auto">
             {generatedModels[activeModel]?.questions?.map((q: any, idx: number) => (
@@ -1222,6 +1401,28 @@ export default function CreateExamPage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1.5 shrink-0 flex-wrap">
+                    {/* Move Up / Down Buttons for custom question ordering */}
+                    <div className="flex items-center gap-0.5 bg-slate-100 p-0.5 rounded-lg border border-slate-200">
+                      <button
+                        type="button"
+                        disabled={idx === 0}
+                        onClick={() => handleMoveQuestion(idx, 'up')}
+                        title="تحريك السؤال لأعلى"
+                        className="p-1 text-slate-600 hover:text-blue-600 hover:bg-white rounded disabled:opacity-30 disabled:pointer-events-none transition"
+                      >
+                        <ArrowUp className="w-3.5 h-3.5" />
+                      </button>
+                      <button
+                        type="button"
+                        disabled={idx === (generatedModels[activeModel]?.questions?.length || 1) - 1}
+                        onClick={() => handleMoveQuestion(idx, 'down')}
+                        title="تحريك السؤال لأسفل"
+                        className="p-1 text-slate-600 hover:text-blue-600 hover:bg-white rounded disabled:opacity-30 disabled:pointer-events-none transition"
+                      >
+                        <ArrowDown className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+
                     <button type="button" onClick={() => handleReplaceRandom(idx)} title="استبدال عشوائي" className="px-2.5 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg text-xs font-bold transition flex items-center gap-1 border border-blue-200">
                       <RefreshCw className="w-3.5 h-3.5" /><span className="hidden sm:inline">بديل عشوائي</span>
                     </button>
