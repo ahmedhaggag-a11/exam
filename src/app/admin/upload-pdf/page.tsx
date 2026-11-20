@@ -472,65 +472,40 @@ export default function AdminUploadPDFPage() {
         setSourceRecordId(activeSourceId);
       }
 
-      // 2. Prepare chunk payload (PDF slice or rendered compressed JPEG images)
+      // 2. Prepare chunk payload - ALWAYS render as compressed JPEGs
+      //    This keeps every request well under Vercel's 4MB body limit,
+      //    even for large high-res scans with many pages.
+      //    Scale 1.4 gives Gemini enough resolution; quality 0.75 keeps each page ~150-250KB.
       const fullBuffer = await file.arrayBuffer();
       let chunkPayload: { pdfBase64?: string; imagesBase64?: string[] } = {};
 
       try {
-        const originalPdfDoc = await PDFDocument.load(fullBuffer);
-        const subPdfDoc = await PDFDocument.create();
-
-        const pageIndices: number[] = [];
-        for (let p = chunk.startPage - 1; p < chunk.endPage; p++) {
-          pageIndices.push(p);
-        }
-
-        const copiedPages = await subPdfDoc.copyPages(originalPdfDoc, pageIndices);
-        copiedPages.forEach((page) => subPdfDoc.addPage(page));
-
-        const chunkPdfBytes = await subPdfDoc.save();
-
-        // If sliced PDF is smaller than 3MB, send directly as PDF
-        if (chunkPdfBytes.byteLength < 3.2 * 1024 * 1024) {
-          let binary = '';
-          for (let i = 0; i < chunkPdfBytes.byteLength; i++) {
-            binary += String.fromCharCode(chunkPdfBytes[i]);
-          }
-          chunkPayload = { pdfBase64: btoa(binary) };
-        } else {
-          // If sliced PDF is heavy (> 3.2MB) from high-res scans, render to compressed JPEGs (~200KB per page)
-          console.info(`Chunk ${chunkIdx + 1} is ${(chunkPdfBytes.byteLength / (1024 * 1024)).toFixed(1)}MB; rendering to lightweight JPEGs for Vercel.`);
-          const pdfJsDoc = await pdfjsLib.getDocument({ data: fullBuffer }).promise;
-          const images: string[] = [];
-          for (let p = chunk.startPage; p <= chunk.endPage; p++) {
-            const page = await pdfJsDoc.getPage(p);
-            const viewport = page.getViewport({ scale: 1.5 });
-            const canvas = document.createElement('canvas');
-            canvas.width = viewport.width;
-            canvas.height = viewport.height;
-            const ctx = canvas.getContext('2d');
-            await page.render({ canvasContext: ctx, viewport }).promise;
-            const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-            images.push(dataUrl.split(',')[1]);
-          }
-          chunkPayload = { imagesBase64: images };
-        }
-      } catch (sliceErr) {
-        console.warn('PDF-lib slice failed or heavy, rendering pages via canvas:', sliceErr);
         const pdfJsDoc = await pdfjsLib.getDocument({ data: fullBuffer }).promise;
         const images: string[] = [];
         for (let p = chunk.startPage; p <= chunk.endPage; p++) {
           const page = await pdfJsDoc.getPage(p);
-          const viewport = page.getViewport({ scale: 1.5 });
+          const viewport = page.getViewport({ scale: 1.4 });
           const canvas = document.createElement('canvas');
           canvas.width = viewport.width;
           canvas.height = viewport.height;
           const ctx = canvas.getContext('2d');
           await page.render({ canvasContext: ctx, viewport }).promise;
-          const dataUrl = canvas.toDataURL('image/jpeg', 0.82);
-          images.push(dataUrl.split(',')[1]);
+          images.push(canvas.toDataURL('image/jpeg', 0.75).split(',')[1]);
         }
         chunkPayload = { imagesBase64: images };
+      } catch (renderErr) {
+        // Ultimate fallback: try PDF-lib slice if canvas rendering fails
+        console.warn('Canvas render failed, falling back to PDF slice:', renderErr);
+        const originalPdfDoc = await PDFDocument.load(fullBuffer);
+        const subPdfDoc = await PDFDocument.create();
+        const pageIndices: number[] = [];
+        for (let p = chunk.startPage - 1; p < chunk.endPage; p++) pageIndices.push(p);
+        const copiedPages = await subPdfDoc.copyPages(originalPdfDoc, pageIndices);
+        copiedPages.forEach((pg) => subPdfDoc.addPage(pg));
+        const chunkPdfBytes = await subPdfDoc.save();
+        let binary = '';
+        for (let i = 0; i < chunkPdfBytes.byteLength; i++) binary += String.fromCharCode(chunkPdfBytes[i]);
+        chunkPayload = { pdfBase64: btoa(binary) };
       }
 
       // 3. Send lightweight chunk to Gemini Multimodal
