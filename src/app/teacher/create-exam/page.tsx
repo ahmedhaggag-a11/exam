@@ -21,6 +21,9 @@ import {
   AlertCircle,
   Award,
   Check,
+  CheckSquare,
+  Square,
+  Filter,
 } from 'lucide-react';
 
 interface Subject { id: string; name: string; }
@@ -71,8 +74,13 @@ export default function CreateExamPage() {
   const [qrUrl, setQrUrl] = useState('');
   const [qrTitle, setQrTitle] = useState('امسح الكود لمشاهدة فيديو شرح وحل الامتحان');
 
-  // ── Step 1 — Chapters, Types, Difficulty
+  // ── Step 1 — Mode & Questions Selection
+  const [creationMode, setCreationMode] = useState<'auto' | 'manual'>('auto');
   const [selectedTopics, setSelectedTopics] = useState<string[]>([]);
+  const [manualSearch, setManualSearch] = useState('');
+  const [manualTypeFilter, setManualTypeFilter] = useState<'all' | 'mcq' | 'essay' | 'true_false'>('all');
+  const [manualDiffFilter, setManualDiffFilter] = useState<'all' | 'easy' | 'medium' | 'hard'>('all');
+  const [selectedManualIds, setSelectedManualIds] = useState<string[]>([]);
   const [mcqCount, setMcqCount] = useState(5);
   const [essayCount, setEssayCount] = useState(1);
   const [tfCount, setTfCount] = useState(0);
@@ -156,6 +164,48 @@ export default function CreateExamPage() {
   const totalRequested = hasDiffTarget
     ? easyCount + mediumCount + hardCount
     : mcqCount + essayCount + tfCount;
+
+  function handleToggleManualSelect(id: string) {
+    setSelectedManualIds(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]);
+  }
+
+  function handleSelectAllVisibleManual(visibleIds: string[]) {
+    const allSelected = visibleIds.every(id => selectedManualIds.includes(id));
+    if (allSelected) {
+      setSelectedManualIds(prev => prev.filter(id => !visibleIds.includes(id)));
+    } else {
+      setSelectedManualIds(prev => Array.from(new Set([...prev, ...visibleIds])));
+    }
+  }
+
+  function handleGenerateManual() {
+    if (selectedManualIds.length === 0) return;
+    const selectedQs = selectedManualIds
+      .map(id => pool.find(q => q.id === id) || questions.find(q => q.id === id))
+      .filter(Boolean) as Question[];
+
+    if (!selectedQs.length) return;
+
+    let models = generateExamModels(
+      selectedQs as any,
+      modelsCount,
+      shuffleQuestionOrder,
+      shuffleChoices,
+      shuffleNumbers
+    );
+
+    if (gradingMode === 'equal' && selectedQs.length > 0) {
+      const baseMark = Math.max(1, Math.round((totalMark / selectedQs.length) * 10) / 10);
+      models = models.map(m => ({
+        ...m,
+        questions: m.questions.map((q: any) => ({ ...q, marks: baseMark }))
+      }));
+    }
+
+    setGeneratedModels(models);
+    setReasoning(`تم تكوين الامتحان بنجاح بناءً على اختيارك اليدوي لعدد (${selectedQs.length}) أسئلة محددة من بنك الأسئلة.`);
+    setStep(4);
+  }
 
   // Active Model Questions & Marks Calculations
   const currentModelQuestions = generatedModels[activeModel]?.questions || [];
@@ -313,14 +363,35 @@ export default function CreateExamPage() {
   }
 
   function handleSaveEditedQuestion() {
-    if (editingIndex === null || !editingQuestion) return;
-    const currentModel = generatedModels[activeModel];
-    if (!currentModel) return;
-    const updated = [...generatedModels];
-    const qs = [...currentModel.questions];
-    qs[editingIndex] = { ...editingQuestion };
-    updated[activeModel] = { ...currentModel, questions: qs };
-    setGeneratedModels(updated);
+    if (!editingQuestion) return;
+
+    // 1. Update questions in the local bank state so manual selection picks up the updated text
+    setQuestions(prev => prev.map(q => q.id === editingQuestion.id ? { ...q, ...editingQuestion } : q));
+
+    // 2. Also persist the updated question text to Supabase database so it remains saved
+    (async () => {
+      try {
+        await supabase.from('questions').update({
+          question_text: editingQuestion.text,
+          difficulty: editingQuestion.difficulty,
+        }).eq('id', editingQuestion.id);
+      } catch (err) {
+        console.error('Failed to update question in DB:', err);
+      }
+    })();
+
+    // 3. If we are editing from Step 4 (active generated model)
+    if (editingIndex !== null) {
+      const currentModel = generatedModels[activeModel];
+      if (currentModel) {
+        const updated = [...generatedModels];
+        const qs = [...currentModel.questions];
+        qs[editingIndex] = { ...editingQuestion };
+        updated[activeModel] = { ...currentModel, questions: qs };
+        setGeneratedModels(updated);
+      }
+    }
+
     setEditingQuestionModalOpen(false);
     setEditingIndex(null);
     setEditingQuestion(null);
@@ -380,7 +451,9 @@ export default function CreateExamPage() {
   }
 
   const canStep0 = !!(title && subjectId && grade);
-  const canStep1 = totalRequested > 0 && pool.length > 0;
+  const canStep1 = creationMode === 'manual'
+    ? selectedManualIds.length > 0
+    : (totalRequested > 0 && pool.length > 0);
 
   return (
     <div className="max-w-4xl mx-auto px-4 pb-12 space-y-6">
@@ -487,115 +560,403 @@ export default function CreateExamPage() {
         </div>
       )}
 
-      {/* ── Step 1: Chapters + Question Types + Difficulty */}
+      {/* ── Step 1: Chapters + Question Types + Difficulty / Manual Picker */}
       {step === 1 && (
         <div className="bg-white rounded-3xl shadow-sm border border-slate-200 p-6 space-y-6">
-          <div className="flex items-center justify-between pb-3 border-b border-slate-100">
+          {/* Header & Mode Switcher */}
+          <div className="flex flex-col sm:flex-row sm:items-center justify-between pb-3 border-b border-slate-100 gap-3">
             <div className="flex items-center gap-2 font-bold text-slate-800 text-base">
-              <Layers className="w-5 h-5 text-blue-600" /><span>تحديد الفصول والأعداد ومستويات الصعوبة</span>
+              <Layers className="w-5 h-5 text-blue-600" /><span>تحديد واختيار أسئلة الامتحان</span>
             </div>
-            <span className="text-xs font-bold px-3 py-1 bg-blue-50 text-blue-700 rounded-full border border-blue-200">إجمالي المتاح: {pool.length} سؤال</span>
+            
+            {/* Mode Toggle Tabs */}
+            <div className="flex items-center bg-slate-100 p-1 rounded-2xl border border-slate-200 self-start sm:self-auto">
+              <button
+                type="button"
+                onClick={() => setCreationMode('auto')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 ${
+                  creationMode === 'auto'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <Sparkles className="w-3.5 h-3.5" />
+                <span>توليد آلي ذكي (AI)</span>
+              </button>
+              <button
+                type="button"
+                onClick={() => setCreationMode('manual')}
+                className={`px-3.5 py-1.5 rounded-xl text-xs font-black transition flex items-center gap-1.5 ${
+                  creationMode === 'manual'
+                    ? 'bg-blue-600 text-white shadow-sm'
+                    : 'text-slate-600 hover:text-slate-900'
+                }`}
+              >
+                <CheckSquare className="w-3.5 h-3.5" />
+                <span>اختيار يدوي وبحث في البنك</span>
+                {selectedManualIds.length > 0 && (
+                  <span className="bg-white text-blue-700 px-1.5 py-0.2 rounded-full text-[10px] font-black mr-1">
+                    {selectedManualIds.length}
+                  </span>
+                )}
+              </button>
+            </div>
           </div>
 
           {pool.length === 0 ? (
             <div className="bg-amber-50 border border-amber-200 rounded-2xl p-4 text-amber-800 text-xs font-bold flex items-center gap-2">
               <AlertCircle className="w-5 h-5 shrink-0" /><span>⚠️ لا توجد أسئلة لهذا المصدر أو المادة. يرجى اختيار مصدر آخر أو رفع أسئلة.</span>
             </div>
-          ) : availableTopics.length > 0 ? (
-            <div>
-              <p className="text-xs font-bold text-slate-700 mb-2">اختر الفصول / الأبواب (اتركها فارغة لاختيار الكل):</p>
-              <div className="flex flex-wrap gap-2">
-                {availableTopics.map(topic => (
-                  <button key={topic} onClick={() => toggleTopic(topic)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition ${selectedTopics.includes(topic) ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-blue-400'}`}>{topic}</button>
-                ))}
-              </div>
-              <p className="text-[11px] text-slate-400 mt-1.5">{selectedTopics.length === 0 ? 'سيتم السحب من جميع الفصول' : `تم اختيار ${selectedTopics.length} فصول`}</p>
-            </div>
-          ) : null}
+          ) : creationMode === 'auto' ? (
+            /* ─── Mode A: Automatic / AI Configuration ─── */
+            <div className="space-y-6">
+              {availableTopics.length > 0 && (
+                <div>
+                  <p className="text-xs font-bold text-slate-700 mb-2">اختر الفصول / الأبواب (اتركها فارغة لاختيار الكل):</p>
+                  <div className="flex flex-wrap gap-2">
+                    {availableTopics.map(topic => (
+                      <button key={topic} onClick={() => toggleTopic(topic)} className={`px-3 py-1.5 rounded-xl text-xs font-bold border transition ${selectedTopics.includes(topic) ? 'bg-blue-600 text-white border-blue-600' : 'bg-slate-50 text-slate-600 border-slate-200 hover:border-blue-400'}`}>{topic}</button>
+                    ))}
+                  </div>
+                  <p className="text-[11px] text-slate-400 mt-1.5">{selectedTopics.length === 0 ? 'سيتم السحب من جميع الفصول' : `تم اختيار ${selectedTopics.length} فصول`}</p>
+                </div>
+              )}
 
-          {/* Question Types */}
-          <div className="space-y-2">
-            <p className="text-xs font-bold text-slate-700">توزيع أنواع الأسئلة:</p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="p-3 bg-blue-50/50 rounded-xl border border-blue-200">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-bold text-blue-900">اختيار من متعدد (MCQ)</span>
-                  <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold">متاح: {mcqAvailable}</span>
+              {/* Question Types */}
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-slate-700">توزيع أنواع الأسئلة:</p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="p-3 bg-blue-50/50 rounded-xl border border-blue-200">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs font-bold text-blue-900">اختيار من متعدد (MCQ)</span>
+                      <span className="text-[10px] bg-blue-100 text-blue-800 px-2 py-0.5 rounded-full font-bold">متاح: {mcqAvailable}</span>
+                    </div>
+                    <input type="number" value={mcqCount} onChange={e => setMcqCount(Math.max(0, Number(e.target.value)))} min={0} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-800 outline-none" />
+                  </div>
+                  <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-200">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs font-bold text-emerald-900">أسئلة مقالية (Essay)</span>
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">متاح: {essayAvailable}</span>
+                    </div>
+                    <input type="number" value={essayCount} onChange={e => setEssayCount(Math.max(0, Number(e.target.value)))} min={0} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-800 outline-none" />
+                  </div>
+                  <div className="p-3 bg-purple-50/50 rounded-xl border border-purple-200">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs font-bold text-purple-900">صح أو خطأ (True/False)</span>
+                      <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full font-bold">متاح: {tfAvailable}</span>
+                    </div>
+                    <input type="number" value={tfCount} onChange={e => setTfCount(Math.max(0, Number(e.target.value)))} min={0} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-800 outline-none" />
+                  </div>
                 </div>
-                <input type="number" value={mcqCount} onChange={e => setMcqCount(Math.max(0, Number(e.target.value)))} min={0} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-800 outline-none" />
               </div>
-              <div className="p-3 bg-emerald-50/50 rounded-xl border border-emerald-200">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-bold text-emerald-900">أسئلة مقالية (Essay)</span>
-                  <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">متاح: {essayAvailable}</span>
-                </div>
-                <input type="number" value={essayCount} onChange={e => setEssayCount(Math.max(0, Number(e.target.value)))} min={0} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-800 outline-none" />
-              </div>
-              <div className="p-3 bg-purple-50/50 rounded-xl border border-purple-200">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-bold text-purple-900">صح أو خطأ (True/False)</span>
-                  <span className="text-[10px] bg-purple-100 text-purple-800 px-2 py-0.5 rounded-full font-bold">متاح: {tfAvailable}</span>
-                </div>
-                <input type="number" value={tfCount} onChange={e => setTfCount(Math.max(0, Number(e.target.value)))} min={0} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-slate-800 outline-none" />
-              </div>
-            </div>
-          </div>
 
-          {/* Difficulty Distribution */}
-          <div className="space-y-2">
-            <p className="text-xs font-bold text-slate-700">
-              توزيع مستويات الصعوبة
-              <span className="text-slate-400 font-normal mr-1">(اختياري — اتركها أصفاراً للاختيار العشوائي)</span>
-            </p>
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-              <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-200">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-bold text-emerald-800">🟢 سهل (Easy)</span>
-                  <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">متاح: {easyAvailable}</span>
+              {/* Difficulty Distribution */}
+              <div className="space-y-2">
+                <p className="text-xs font-bold text-slate-700">
+                  توزيع مستويات الصعوبة
+                  <span className="text-slate-400 font-normal mr-1">(اختياري — اتركها أصفاراً للاختيار العشوائي)</span>
+                </p>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                  <div className="p-3 bg-emerald-50/60 rounded-xl border border-emerald-200">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs font-bold text-emerald-800">🟢 سهل (Easy)</span>
+                      <span className="text-[10px] bg-emerald-100 text-emerald-800 px-2 py-0.5 rounded-full font-bold">متاح: {easyAvailable}</span>
+                    </div>
+                    <input type="number" value={easyCount} onChange={e => setEasyCount(Math.max(0, Number(e.target.value)))} min={0} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-emerald-700 outline-none" />
+                  </div>
+                  <div className="p-3 bg-amber-50/60 rounded-xl border border-amber-200">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs font-bold text-amber-800">🟡 متوسط (Medium)</span>
+                      <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-bold">متاح: {medAvailable}</span>
+                    </div>
+                    <input type="number" value={mediumCount} onChange={e => setMediumCount(Math.max(0, Number(e.target.value)))} min={0} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-amber-700 outline-none" />
+                  </div>
+                  <div className="p-3 bg-red-50/60 rounded-xl border border-red-200">
+                    <div className="flex justify-between items-center mb-1">
+                      <span className="text-xs font-bold text-red-800">🔴 صعب (Hard)</span>
+                      <span className="text-[10px] bg-red-100 text-red-800 px-2 py-0.5 rounded-full font-bold">متاح: {hardAvailable}</span>
+                    </div>
+                    <input type="number" value={hardCount} onChange={e => setHardCount(Math.max(0, Number(e.target.value)))} min={0} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-red-700 outline-none" />
+                  </div>
                 </div>
-                <input type="number" value={easyCount} onChange={e => setEasyCount(Math.max(0, Number(e.target.value)))} min={0} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-emerald-700 outline-none" />
               </div>
-              <div className="p-3 bg-amber-50/60 rounded-xl border border-amber-200">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-bold text-amber-800">🟡 متوسط (Medium)</span>
-                  <span className="text-[10px] bg-amber-100 text-amber-800 px-2 py-0.5 rounded-full font-bold">متاح: {medAvailable}</span>
-                </div>
-                <input type="number" value={mediumCount} onChange={e => setMediumCount(Math.max(0, Number(e.target.value)))} min={0} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-amber-700 outline-none" />
-              </div>
-              <div className="p-3 bg-red-50/60 rounded-xl border border-red-200">
-                <div className="flex justify-between items-center mb-1">
-                  <span className="text-xs font-bold text-red-800">🔴 صعب (Hard)</span>
-                  <span className="text-[10px] bg-red-100 text-red-800 px-2 py-0.5 rounded-full font-bold">متاح: {hardAvailable}</span>
-                </div>
-                <input type="number" value={hardCount} onChange={e => setHardCount(Math.max(0, Number(e.target.value)))} min={0} className="w-full bg-white border border-slate-300 rounded-lg px-3 py-2 text-sm font-bold text-red-700 outline-none" />
-              </div>
-            </div>
-          </div>
 
-          {/* Summary */}
-          <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-xs text-blue-900 space-y-2">
-            <div className="flex flex-wrap items-center justify-between gap-2 font-bold">
-              <span>إجمالي المطلوب: <strong className="text-sm font-black text-blue-700">{totalRequested}</strong> سؤال</span>
-              <span>المتاح في البنك: <strong className="text-sm font-black text-emerald-700">{pool.length}</strong> سؤال</span>
-            </div>
-            <div className="text-[11px] text-slate-600 flex flex-wrap gap-3 pt-1 border-t border-blue-200/60">
-              <span>MCQ: <strong>{mcqAvailable}</strong></span>
-              <span>مقالي: <strong>{essayAvailable}</strong></span>
-              <span>صح/خطأ: <strong>{tfAvailable}</strong></span>
-              <span className="text-emerald-700">سهل: <strong>{easyAvailable}</strong></span>
-              <span className="text-amber-700">متوسط: <strong>{medAvailable}</strong></span>
-              <span className="text-red-700">صعب: <strong>{hardAvailable}</strong></span>
-            </div>
-            {pool.length < totalRequested && totalRequested > 0 && (
-              <div className="text-amber-800 bg-amber-100/70 p-2 rounded-lg font-bold">
-                ⚠️ المطلوب ({totalRequested}) أكبر من المتاح ({pool.length}). سيتم اختيار المتاح بالكامل.
+              {/* Summary */}
+              <div className="bg-blue-50 border border-blue-200 rounded-2xl p-4 text-xs text-blue-900 space-y-2">
+                <div className="flex flex-wrap items-center justify-between gap-2 font-bold">
+                  <span>إجمالي المطلوب: <strong className="text-sm font-black text-blue-700">{totalRequested}</strong> سؤال</span>
+                  <span>المتاح في البنك: <strong className="text-sm font-black text-emerald-700">{pool.length}</strong> سؤال</span>
+                </div>
+                <div className="text-[11px] text-slate-600 flex flex-wrap gap-3 pt-1 border-t border-blue-200/60">
+                  <span>MCQ: <strong>{mcqAvailable}</strong></span>
+                  <span>مقالي: <strong>{essayAvailable}</strong></span>
+                  <span>صح/خطأ: <strong>{tfAvailable}</strong></span>
+                  <span className="text-emerald-700">سهل: <strong>{easyAvailable}</strong></span>
+                  <span className="text-amber-700">متوسط: <strong>{medAvailable}</strong></span>
+                  <span className="text-red-700">صعب: <strong>{hardAvailable}</strong></span>
+                </div>
+                {pool.length < totalRequested && totalRequested > 0 && (
+                  <div className="text-amber-800 bg-amber-100/70 p-2 rounded-lg font-bold">
+                    ⚠️ المطلوب ({totalRequested}) أكبر من المتاح ({pool.length}). سيتم اختيار المتاح بالكامل.
+                  </div>
+                )}
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            /* ─── Mode B: Manual Selection & Search in Question Bank ─── */
+            <div className="space-y-4">
+              {/* Search Bar & Filters */}
+              <div className="p-4 bg-slate-50 border border-slate-200 rounded-2xl space-y-3">
+                <div className="relative">
+                  <Search className="w-4 h-4 text-slate-400 absolute right-3.5 top-3" />
+                  <input
+                    type="text"
+                    value={manualSearch}
+                    onChange={e => setManualSearch(e.target.value)}
+                    placeholder="ابحث في نص السؤال، الفصل، الدرس، أو الكلمات المفتاحية..."
+                    className="w-full pr-10 pl-10 py-2.5 bg-white border border-slate-300 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                  {manualSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setManualSearch('')}
+                      className="absolute left-3 top-2.5 p-0.5 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-4 h-4" />
+                    </button>
+                  )}
+                </div>
 
-          <div className="flex justify-between pt-2">
+                {/* Filter Pills */}
+                <div className="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-slate-500 font-bold flex items-center gap-1 text-[11px]">
+                      <Filter className="w-3.5 h-3.5" />
+                      <span>النوع:</span>
+                    </span>
+                    {(['all', 'mcq', 'essay', 'true_false'] as const).map(type => (
+                      <button
+                        key={type}
+                        type="button"
+                        onClick={() => setManualTypeFilter(type)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                          manualTypeFilter === type
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {type === 'all' ? 'الكل' : type === 'mcq' ? 'MCQ' : type === 'essay' ? 'مقالي' : 'صح/خطأ'}
+                      </button>
+                    ))}
+                  </div>
+
+                  <div className="flex flex-wrap items-center gap-1.5">
+                    <span className="text-slate-500 font-bold text-[11px]">الصعوبة:</span>
+                    {(['all', 'easy', 'medium', 'hard'] as const).map(diff => (
+                      <button
+                        key={diff}
+                        type="button"
+                        onClick={() => setManualDiffFilter(diff)}
+                        className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                          manualDiffFilter === diff
+                            ? 'bg-blue-600 text-white border-blue-600'
+                            : 'bg-white text-slate-600 border-slate-200 hover:bg-slate-100'
+                        }`}
+                      >
+                        {diff === 'all' ? 'الكل' : diff === 'easy' ? '🟢 سهل' : diff === 'medium' ? '🟡 متوسط' : '🔴 صعب'}
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Topic selection chips if available */}
+                {availableTopics.length > 0 && (
+                  <div className="pt-2 border-t border-slate-200/80">
+                    <p className="text-[11px] font-bold text-slate-600 mb-1.5">تصفية حسب الفصل / الباب:</p>
+                    <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto">
+                      {availableTopics.map(topic => (
+                        <button
+                          key={topic}
+                          type="button"
+                          onClick={() => toggleTopic(topic)}
+                          className={`px-2.5 py-1 rounded-lg text-[11px] font-bold border transition ${
+                            selectedTopics.includes(topic)
+                              ? 'bg-blue-600 text-white border-blue-600'
+                              : 'bg-white text-slate-600 border-slate-200 hover:border-blue-400'
+                          }`}
+                        >
+                          {topic}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+                )}
+              </div>
+
+              {/* Filtered Question Bank Results */}
+              {(() => {
+                const filteredQuestions = pool.filter(q => {
+                  if (manualTypeFilter !== 'all' && q.question_type !== manualTypeFilter) return false;
+                  if (manualDiffFilter !== 'all' && q.difficulty !== manualDiffFilter) return false;
+                  if (manualSearch.trim()) {
+                    const term = manualSearch.toLowerCase();
+                    const textMatch = (q.text || q.question_text || '').toLowerCase().includes(term);
+                    const chapterMatch = (q.chapter || q.topic || '').toLowerCase().includes(term);
+                    if (!textMatch && !chapterMatch) return false;
+                  }
+                  return true;
+                });
+
+                const visibleIds = filteredQuestions.map(q => q.id);
+                const allVisibleSelected = visibleIds.length > 0 && visibleIds.every(id => selectedManualIds.includes(id));
+
+                return (
+                  <div className="space-y-3">
+                    {/* List Controls & Counter */}
+                    <div className="flex flex-wrap items-center justify-between gap-2 px-1">
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => handleSelectAllVisibleManual(visibleIds)}
+                          className="px-3 py-1.5 bg-slate-100 hover:bg-slate-200 text-slate-700 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+                        >
+                          {allVisibleSelected ? <CheckSquare className="w-4 h-4 text-blue-600" /> : <Square className="w-4 h-4 text-slate-400" />}
+                          <span>{allVisibleSelected ? 'إلغاء تحديد المعروض' : 'تحديد كل المعروض'}</span>
+                        </button>
+                        <span className="text-xs text-slate-500 font-semibold">
+                          (معروض: {filteredQuestions.length} سؤال)
+                        </span>
+                      </div>
+
+                      {/* Selected Counter Pill */}
+                      <div className="flex items-center gap-2">
+                        {selectedManualIds.length > 0 && (
+                          <button
+                            type="button"
+                            onClick={() => setSelectedManualIds([])}
+                            className="text-[11px] text-red-600 hover:underline font-bold"
+                          >
+                            مسح التحديد
+                          </button>
+                        )}
+                        <span className="px-3 py-1 bg-blue-50 text-blue-800 rounded-xl border border-blue-200 text-xs font-black flex items-center gap-1.5">
+                          <Check className="w-4 h-4 text-blue-600" />
+                          <span>تم اختيار: {selectedManualIds.length} سؤال</span>
+                        </span>
+                      </div>
+                    </div>
+
+                    {/* Questions Cards List */}
+                    <div className="border border-slate-200 rounded-2xl divide-y divide-slate-100 max-h-[460px] overflow-y-auto">
+                      {filteredQuestions.length === 0 ? (
+                        <div className="p-8 text-center text-slate-400 text-xs font-bold">
+                          لا توجد أسئلة تطابق البحث أو التصفيات الحالية.
+                        </div>
+                      ) : (
+                        filteredQuestions.map((q, idx) => {
+                          const isSelected = selectedManualIds.includes(q.id);
+                          return (
+                            <div
+                              key={q.id || idx}
+                              className={`p-4 transition space-y-2 cursor-pointer ${
+                                isSelected ? 'bg-blue-50/50 hover:bg-blue-50/80' : 'hover:bg-slate-50/50'
+                              }`}
+                              onClick={() => handleToggleManualSelect(q.id)}
+                            >
+                              <div className="flex items-start justify-between gap-3">
+                                <div className="flex items-start gap-3 flex-1">
+                                  {/* Checkbox */}
+                                  <div className="pt-0.5 shrink-0" onClick={e => e.stopPropagation()}>
+                                    <input
+                                      type="checkbox"
+                                      checked={isSelected}
+                                      onChange={() => handleToggleManualSelect(q.id)}
+                                      className="w-5 h-5 accent-blue-600 rounded cursor-pointer"
+                                    />
+                                  </div>
+
+                                  <div className="space-y-1 flex-1">
+                                    <div className="flex items-center gap-2 flex-wrap">
+                                      <span className={`text-[10px] px-2 py-0.5 rounded-md font-bold ${
+                                        q.question_type === 'mcq' ? 'bg-blue-100 text-blue-800' : q.question_type === 'essay' ? 'bg-emerald-100 text-emerald-800' : 'bg-purple-100 text-purple-800'
+                                      }`}>
+                                        {q.question_type === 'mcq' ? 'اختيار من متعدد' : q.question_type === 'essay' ? 'مقالي' : 'صح/خطأ'}
+                                      </span>
+                                      <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 font-bold">
+                                        {q.difficulty === 'easy' ? '🟢 سهل' : q.difficulty === 'hard' ? '🔴 صعب' : '🟡 متوسط'}
+                                      </span>
+                                      {q.chapter && (
+                                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 font-semibold">
+                                          {q.chapter}
+                                        </span>
+                                      )}
+                                      {isSelected && (
+                                        <span className="text-[10px] px-2 py-0.5 rounded-md bg-blue-600 text-white font-bold mr-auto">
+                                          ✓ تم الاختيار
+                                        </span>
+                                      )}
+                                    </div>
+
+                                    {/* Question Text */}
+                                    <p className="text-sm font-bold text-slate-800 leading-relaxed pt-1">
+                                      {q.text || q.question_text}
+                                    </p>
+
+                                    {/* MCQ choices preview if present */}
+                                    {q.choices && q.choices.length > 0 && (
+                                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                                        {[...q.choices].sort((a: any, b: any) => a.order_index - b.order_index).map((c: any, ci: number) => (
+                                          <div key={ci} className={`text-xs p-2 rounded-lg border flex items-center justify-between ${
+                                            c.is_correct ? 'bg-emerald-50 text-emerald-900 border-emerald-300 font-bold' : 'bg-white text-slate-700 border-slate-200'
+                                          }`}>
+                                            <span>({c.choice_code || ['أ', 'ب', 'ج', 'د'][ci]}) {c.text}</span>
+                                            {c.is_correct && <span className="text-emerald-700 text-xs">✓ صحيح</span>}
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </div>
+                                </div>
+
+                                {/* Quick Edit Question Text Button */}
+                                <div className="shrink-0 pt-0.5" onClick={e => e.stopPropagation()}>
+                                  <button
+                                    type="button"
+                                    onClick={() => openEditQuestionModal(q, -1)}
+                                    title="تعديل نص السؤال"
+                                    className="px-2.5 py-1.5 bg-slate-100 hover:bg-blue-50 text-slate-600 hover:text-blue-700 rounded-xl text-xs font-bold transition flex items-center gap-1 border border-slate-200"
+                                  >
+                                    <Edit3 className="w-3.5 h-3.5" />
+                                    <span className="hidden sm:inline">تعديل النص</span>
+                                  </button>
+                                </div>
+                              </div>
+                            </div>
+                          );
+                        })
+                      )}
+                    </div>
+                  </div>
+                );
+              })()}
+            </div>
+          )}
+
+          <div className="flex justify-between pt-2 border-t border-slate-100">
             <button onClick={() => setStep(0)} className="px-5 py-2.5 border border-slate-300 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition">→ السابق</button>
-            <button disabled={!canStep1} onClick={() => setStep(2)} className="px-7 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold disabled:opacity-40 hover:bg-blue-700 transition shadow-md shadow-blue-600/20">التالي (إعدادات النماذج) ←</button>
+            <button
+              disabled={!canStep1}
+              onClick={() => {
+                if (creationMode === 'manual') {
+                  setStep(2);
+                } else {
+                  setStep(2);
+                }
+              }}
+              className="px-7 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-bold disabled:opacity-40 hover:bg-blue-700 transition shadow-md shadow-blue-600/20"
+            >
+              التالي (إعدادات النماذج) ←
+            </button>
           </div>
         </div>
       )}
@@ -642,9 +1003,19 @@ export default function CreateExamPage() {
 
           <div className="flex justify-between pt-3 border-t border-slate-100">
             <button onClick={() => setStep(1)} className="px-5 py-2.5 border border-slate-300 text-slate-600 rounded-xl text-xs font-bold hover:bg-slate-50 transition">→ السابق</button>
-            <button onClick={() => { setStep(3); handleGenerate(); }} className="px-7 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-black hover:bg-blue-700 transition shadow-md shadow-blue-600/30 flex items-center gap-2">
+            <button
+              onClick={() => {
+                if (creationMode === 'manual') {
+                  handleGenerateManual();
+                } else {
+                  setStep(3);
+                  handleGenerate();
+                }
+              }}
+              className="px-7 py-2.5 bg-blue-600 text-white rounded-xl text-sm font-black hover:bg-blue-700 transition shadow-md shadow-blue-600/30 flex items-center gap-2"
+            >
               <Sparkles className="w-4 h-4 text-amber-300" />
-              <span>توليد الامتحان ⚡</span>
+              <span>{creationMode === 'manual' ? 'تجهيز النماذج بالأسئلة المختارة ⚡' : 'توليد الامتحان ⚡'}</span>
             </button>
           </div>
         </div>
