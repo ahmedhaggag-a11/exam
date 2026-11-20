@@ -189,11 +189,28 @@ export async function registerSourceRecord(
   gradeLevel: string
 ) {
   try {
+    const finalName = sourceName || fileName;
+
+    // Check if a source with the exact same name already exists for this teacher
+    const { data: existingSource } = await supabaseAdmin
+      .from('sources')
+      .select('*')
+      .eq('teacher_id', teacherId)
+      .eq('name', finalName)
+      .order('created_at', { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingSource) {
+      console.log(`Found existing source record (${existingSource.id}) for "${finalName}". Reusing it.`);
+      return { success: true, sourceData: existingSource };
+    }
+
     const { data: sourceData, error: sourceError } = await supabaseAdmin
       .from('sources')
       .insert({
         teacher_id: teacherId,
-        name: sourceName || fileName,
+        name: finalName,
         original_filename: fileName,
         storage_path: `registered/${Date.now()}_${fileName}`,
         file_url: 'https://supabase.co',

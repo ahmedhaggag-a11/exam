@@ -19,6 +19,9 @@ import {
   Sliders,
   CheckCircle2,
   QrCode,
+  Image as ImageIcon,
+  Upload,
+  X,
 } from 'lucide-react';
 
 export default function TeacherPaperTemplatePage() {
@@ -226,7 +229,7 @@ export default function TeacherPaperTemplatePage() {
               }`}
             >
               <Sparkles className="w-3.5 h-3.5" />
-              <span>العلامة المائية</span>
+              <span>الخلفية والعلامة المائية</span>
             </button>
 
             <button
@@ -459,11 +462,14 @@ export default function TeacherPaperTemplatePage() {
             </div>
           )}
 
-          {/* TAB 3: WATERMARK */}
+          {/* TAB 3: WATERMARK & BACKGROUND IMAGE */}
           {activeTab === 'watermark' && (
             <div className="space-y-4">
               <div className="flex items-center justify-between p-3 bg-slate-50 rounded-2xl border border-slate-200">
-                <span className="text-xs font-bold text-slate-800">تفعيل العلامة المائية في خلفية الامتحان</span>
+                <div>
+                  <span className="text-xs font-bold text-slate-800 block">تفعيل خلفية الورقة / العلامة المائية</span>
+                  <span className="text-[11px] text-slate-500">صورة خلفية كاملة، لوجو، أو علامة مائية نصية تظهر في خلفية الامتحان</span>
+                </div>
                 <input
                   type="checkbox"
                   checked={config.watermark?.enabled ?? false}
@@ -473,8 +479,10 @@ export default function TeacherPaperTemplatePage() {
                       watermark: {
                         ...config.watermark,
                         enabled: e.target.checked,
+                        type: config.watermark?.type || 'image',
                         text: config.watermark?.text || teacherName || 'الفيزياء',
-                        opacity: config.watermark?.opacity ?? 0.07,
+                        opacity: config.watermark?.opacity ?? 0.08,
+                        size: config.watermark?.size || 'contain',
                       },
                     })
                   }
@@ -484,32 +492,177 @@ export default function TeacherPaperTemplatePage() {
 
               {config.watermark?.enabled && (
                 <>
+                  {/* Type Selector: Image vs Text */}
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">نص العلامة المائية:</label>
-                    <input
-                      type="text"
-                      value={config.watermark.text || ''}
-                      onChange={(e) =>
-                        setConfig({
-                          ...config,
-                          watermark: { ...config.watermark, text: e.target.value },
-                        })
-                      }
-                      placeholder="الأستاذ أحمد حجاج"
-                      className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500"
-                    />
+                    <label className="block text-xs font-bold text-slate-700 mb-1.5">نوع الخلفية:</label>
+                    <div className="grid grid-cols-2 gap-2">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setConfig({
+                            ...config,
+                            watermark: { ...config.watermark, type: 'image' },
+                          })
+                        }
+                        className={`p-2.5 rounded-xl border text-center transition flex items-center justify-center gap-1.5 ${
+                          (config.watermark?.type || 'image') === 'image'
+                            ? 'border-blue-600 bg-blue-50 text-blue-700 font-bold'
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-600 font-semibold'
+                        }`}
+                      >
+                        <ImageIcon className="w-4 h-4" />
+                        <span className="text-xs">صورة خلفية / لوجو</span>
+                      </button>
+
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setConfig({
+                            ...config,
+                            watermark: { ...config.watermark, type: 'text' },
+                          })
+                        }
+                        className={`p-2.5 rounded-xl border text-center transition flex items-center justify-center gap-1.5 ${
+                          config.watermark?.type === 'text'
+                            ? 'border-blue-600 bg-blue-50 text-blue-700 font-bold'
+                            : 'border-slate-200 hover:bg-slate-50 text-slate-600 font-semibold'
+                        }`}
+                      >
+                        <FileText className="w-4 h-4" />
+                        <span className="text-xs">علامة نصية مائلة</span>
+                      </button>
+                    </div>
                   </div>
 
+                  {/* Image Upload / URL Controls */}
+                  {(config.watermark?.type || 'image') === 'image' && (
+                    <div className="space-y-3 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl">
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1.5">
+                          رفع صورة الخلفية من جهازك:
+                        </label>
+                        <div className="flex items-center gap-2">
+                          <label className="flex-1 flex items-center justify-center gap-2 px-4 py-2.5 bg-white border border-dashed border-slate-300 hover:border-blue-500 rounded-xl cursor-pointer text-xs font-bold text-slate-700 transition">
+                            <Upload className="w-4 h-4 text-blue-600" />
+                            <span>{config.watermark?.imageUrl ? 'تغيير صورة الخلفية' : 'اختر صورة من جهازك'}</span>
+                            <input
+                              type="file"
+                              accept="image/*"
+                              className="hidden"
+                              onChange={(e) => {
+                                const file = e.target.files?.[0];
+                                if (file) {
+                                  const reader = new FileReader();
+                                  reader.onload = (ev) => {
+                                    const base64 = ev.target?.result as string;
+                                    setConfig({
+                                      ...config,
+                                      watermark: {
+                                        ...config.watermark,
+                                        type: 'image',
+                                        imageUrl: base64,
+                                      },
+                                    });
+                                  };
+                                  reader.readAsDataURL(file);
+                                }
+                              }}
+                            />
+                          </label>
+
+                          {config.watermark?.imageUrl && (
+                            <button
+                              type="button"
+                              onClick={() =>
+                                setConfig({
+                                  ...config,
+                                  watermark: {
+                                    ...config.watermark,
+                                    imageUrl: '',
+                                  },
+                                })
+                              }
+                              className="p-2.5 bg-red-50 text-red-600 hover:bg-red-100 rounded-xl border border-red-200 transition"
+                              title="حذف الصورة"
+                            >
+                              <X className="w-4 h-4" />
+                            </button>
+                          )}
+                        </div>
+                      </div>
+
+                      {/* Image Preview & URL option */}
+                      {config.watermark?.imageUrl && (
+                        <div className="flex items-center gap-3 p-2 bg-white rounded-xl border border-slate-200">
+                          <img
+                            src={config.watermark.imageUrl}
+                            alt="Background Preview"
+                            className="w-14 h-14 object-contain rounded-lg border border-slate-100 bg-slate-50"
+                          />
+                          <div className="flex-1 text-xs">
+                            <span className="font-bold text-slate-800 block">تم تحميل صورة الخلفية بنجاح</span>
+                            <span className="text-[11px] text-slate-400">تظهر حالياً في المعاينة التفاعلية لورقة الامتحان</span>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Image Fit / Sizing */}
+                      <div>
+                        <label className="block text-xs font-bold text-slate-700 mb-1">طريقة ملء الصفحة:</label>
+                        <select
+                          value={config.watermark?.size || 'contain'}
+                          onChange={(e) =>
+                            setConfig({
+                              ...config,
+                              watermark: {
+                                ...config.watermark,
+                                size: e.target.value as any,
+                              },
+                            })
+                          }
+                          className="w-full px-3 py-2 bg-white border border-slate-300 rounded-xl text-xs font-semibold"
+                        >
+                          <option value="contain">متوسط في منتصف الورقة (لوجو شيك - Contain)</option>
+                          <option value="cover">ملء كامل مساحة الورقة (Full Cover Background)</option>
+                          <option value="auto">الحجم الطبيعي الأصلي للصورة (Auto)</option>
+                        </select>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Text Controls */}
+                  {config.watermark?.type === 'text' && (
+                    <div>
+                      <label className="block text-xs font-bold text-slate-700 mb-1">نص العلامة المائية:</label>
+                      <input
+                        type="text"
+                        value={config.watermark.text || ''}
+                        onChange={(e) =>
+                          setConfig({
+                            ...config,
+                            watermark: { ...config.watermark, text: e.target.value },
+                          })
+                        }
+                        placeholder="الأستاذ مصطفى جلاهم"
+                        className="w-full px-3.5 py-2 bg-slate-50 border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500"
+                      />
+                    </div>
+                  )}
+
+                  {/* Opacity slider */}
                   <div>
-                    <label className="block text-xs font-bold text-slate-700 mb-1">
-                      درجة الشفافية: {Math.round((config.watermark.opacity || 0.07) * 100)}%
-                    </label>
+                    <div className="flex items-center justify-between text-xs font-bold text-slate-700 mb-1">
+                      <span>درجة شفافية الخلفية (Opacity):</span>
+                      <span className="font-mono text-blue-600 font-bold">
+                        {Math.round((config.watermark.opacity || 0.08) * 100)}%
+                      </span>
+                    </div>
                     <input
                       type="range"
                       min="0.02"
-                      max="0.25"
+                      max="0.40"
                       step="0.01"
-                      value={config.watermark.opacity ?? 0.07}
+                      value={config.watermark.opacity ?? 0.08}
                       onChange={(e) =>
                         setConfig({
                           ...config,
@@ -519,8 +672,13 @@ export default function TeacherPaperTemplatePage() {
                           },
                         })
                       }
-                      className="w-full accent-blue-600"
+                      className="w-full accent-blue-600 cursor-pointer"
                     />
+                    <div className="flex justify-between text-[10px] text-slate-400 mt-0.5">
+                      <span>خافتة جداً (طباعة واضحة)</span>
+                      <span>متوسطة (موصى بها 8-12%)</span>
+                      <span>بارزة</span>
+                    </div>
                   </div>
                 </>
               )}

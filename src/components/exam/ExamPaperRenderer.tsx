@@ -117,18 +117,35 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
         fontSize: config.fontSize === 'sm' ? '0.875rem' : config.fontSize === 'lg' ? '1.125rem' : '1rem',
       }}
     >
-      {/* WATERMARK */}
-      {config.watermark.enabled && config.watermark.text && (
+      {/* WATERMARK / BACKGROUND IMAGE */}
+      {config.watermark?.enabled && (
         <div
           className="absolute inset-0 flex items-center justify-center pointer-events-none select-none z-0 overflow-hidden"
           style={{ opacity: config.watermark.opacity }}
         >
-          <span
-            className="text-6xl sm:text-8xl font-black text-slate-800 tracking-wider whitespace-nowrap"
-            style={{ transform: `rotate(${config.watermark.angle}deg)` }}
-          >
-            {config.watermark.text}
-          </span>
+          {config.watermark.type === 'image' && config.watermark.imageUrl ? (
+            <img
+              src={config.watermark.imageUrl}
+              alt="Watermark Background"
+              className={
+                config.watermark.size === 'cover'
+                  ? 'w-full h-full object-cover'
+                  : config.watermark.size === 'auto'
+                  ? 'max-w-[70%] max-h-[70%] object-contain'
+                  : 'max-w-[85%] max-h-[85%] object-contain'
+              }
+              style={{
+                transform: config.watermark.angle ? `rotate(${config.watermark.angle}deg)` : undefined,
+              }}
+            />
+          ) : config.watermark.text ? (
+            <span
+              className="text-6xl sm:text-8xl font-black text-slate-800 tracking-wider whitespace-nowrap"
+              style={{ transform: `rotate(${config.watermark.angle || -30}deg)` }}
+            >
+              {config.watermark.text}
+            </span>
+          ) : null}
         </div>
       )}
 

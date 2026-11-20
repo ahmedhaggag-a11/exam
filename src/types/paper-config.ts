@@ -29,13 +29,15 @@ export interface ExamPaperConfig {
     };
   };
 
-  // Watermark
+  // Watermark / Background
   watermark: {
     enabled: boolean;
-    type: 'text' | 'logo';
+    type: 'text' | 'image';
     text: string;
+    imageUrl?: string;
     opacity: number; // 0.05 to 0.3
     angle: number;   // -45 to 0
+    size?: 'cover' | 'contain' | 'auto';
   };
 
   // Questions Style
@@ -99,8 +101,10 @@ export const DEFAULT_PAPER_CONFIG: ExamPaperConfig = {
     enabled: false,
     type: 'text',
     text: 'ExamForge',
+    imageUrl: '',
     opacity: 0.08,
     angle: -30,
+    size: 'contain',
   },
 
   questions: {
