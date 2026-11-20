@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { 
   Upload, 
@@ -85,6 +85,9 @@ export default function AdminUploadPDFPage() {
   const [showAddLessonModal, setShowAddLessonModal] = useState(false);
   const [newLessonChapter, setNewLessonChapter] = useState('');
   const [newLessonName, setNewLessonName] = useState('');
+
+  // Reusable PDF.js document ref (keeps parsed PDF open in memory across all chunks)
+  const loadedPdfDocRef = useRef<any>(null);
 
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -190,8 +193,9 @@ export default function AdminUploadPDFPage() {
       try {
         setStatusMsg({ type: 'success', text: 'جاري فحص صفحات المستند...' });
         const arrayBuffer = await f.arrayBuffer();
-        // Clone buffer via Uint8Array to prevent worker from detaching original File buffer
-        const pdfDoc = await pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer.slice(0)) }).promise;
+        const data = new Uint8Array(arrayBuffer);
+        const pdfDoc = await pdfjsLib.getDocument({ data }).promise;
+        loadedPdfDocRef.current = pdfDoc;
         const pages = pdfDoc.numPages;
         setTotalPages(pages);
 
@@ -473,43 +477,27 @@ export default function AdminUploadPDFPage() {
         setSourceRecordId(activeSourceId);
       }
 
-      // 2. Prepare chunk payload - ALWAYS render as compressed JPEGs
-      //    This keeps every request well under Vercel's 4MB body limit,
-      //    even for large high-res scans with many pages.
-      //    Clone the buffer to prevent worker detachment.
-      const fullBuffer = await file.arrayBuffer();
-      const pdfBytesCopy = new Uint8Array(fullBuffer.slice(0));
-      let chunkPayload: { pdfBase64?: string; imagesBase64?: string[] } = {};
-      let sharedPdfJsDoc: any = null;
-
-      try {
-        sharedPdfJsDoc = await pdfjsLib.getDocument({ data: pdfBytesCopy }).promise;
-        const images: string[] = [];
-        for (let p = chunk.startPage; p <= chunk.endPage; p++) {
-          const page = await sharedPdfJsDoc.getPage(p);
-          const viewport = page.getViewport({ scale: 1.4 });
-          const canvas = document.createElement('canvas');
-          canvas.width = viewport.width;
-          canvas.height = viewport.height;
-          const ctx = canvas.getContext('2d');
-          await page.render({ canvasContext: ctx, viewport }).promise;
-          images.push(canvas.toDataURL('image/jpeg', 0.75).split(',')[1]);
-        }
-        chunkPayload = { imagesBase64: images };
-      } catch (renderErr) {
-        // Fallback: try PDF-lib slice if canvas rendering fails
-        console.warn('Canvas render failed, falling back to PDF slice:', renderErr);
-        const originalPdfDoc = await PDFDocument.load(new Uint8Array(fullBuffer.slice(0)));
-        const subPdfDoc = await PDFDocument.create();
-        const pageIndices: number[] = [];
-        for (let p = chunk.startPage - 1; p < chunk.endPage; p++) pageIndices.push(p);
-        const copiedPages = await subPdfDoc.copyPages(originalPdfDoc, pageIndices);
-        copiedPages.forEach((pg) => subPdfDoc.addPage(pg));
-        const chunkPdfBytes = await subPdfDoc.save();
-        let binary = '';
-        for (let i = 0; i < chunkPdfBytes.byteLength; i++) binary += String.fromCharCode(chunkPdfBytes[i]);
-        chunkPayload = { pdfBase64: btoa(binary) };
+      // 2. Prepare chunk payload using the loaded PDF.js document directly
+      let doc = loadedPdfDocRef.current;
+      if (!doc) {
+        const fullBuffer = await file.arrayBuffer();
+        doc = await pdfjsLib.getDocument({ data: new Uint8Array(fullBuffer) }).promise;
+        loadedPdfDocRef.current = doc;
       }
+
+      let chunkPayload: { pdfBase64?: string; imagesBase64?: string[] } = {};
+      const images: string[] = [];
+      for (let p = chunk.startPage; p <= chunk.endPage; p++) {
+        const page = await doc.getPage(p);
+        const viewport = page.getViewport({ scale: 1.4 });
+        const canvas = document.createElement('canvas');
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+        const ctx = canvas.getContext('2d');
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        images.push(canvas.toDataURL('image/jpeg', 0.75).split(',')[1]);
+      }
+      chunkPayload = { imagesBase64: images };
 
       // 3. Send lightweight chunk to Gemini Multimodal
       const chunkLabel = chunk.label || `ص ${chunk.startPage} - ${chunk.endPage}`;
@@ -529,19 +517,19 @@ export default function AdminUploadPDFPage() {
 
       const extractedQs = Array.isArray(extractRes.questions) ? extractRes.questions : [];
 
-      // 4. Crop images if any (reusing sharedPdfJsDoc safely without re-parsing buffer)
+      // 4. Crop images if any (reusing doc safely without re-parsing buffer)
       const questionsWithImages = extractedQs.filter(
         (q: any) => q.has_image && q.image_page_number && q.image_box
       );
 
-      if (questionsWithImages.length > 0 && sharedPdfJsDoc) {
+      if (questionsWithImages.length > 0 && doc) {
         for (let i = 0; i < extractedQs.length; i++) {
           const q = extractedQs[i];
           if (q.has_image && q.image_page_number && q.image_box) {
             // Absolute page number in the original book
             const absPageNum = chunk.startPage + (q.image_page_number - 1);
-            const pageNum = Math.min(Math.max(1, absPageNum), sharedPdfJsDoc.numPages);
-            const base64Img = await cropImageFromPdf(sharedPdfJsDoc, pageNum, q.image_box);
+            const pageNum = Math.min(Math.max(1, absPageNum), doc.numPages);
+            const base64Img = await cropImageFromPdf(doc, pageNum, q.image_box);
             if (base64Img) {
               const url = await uploadImageFromBase64(base64Img, selectedTeacherId);
               if (url) q.final_image_url = url;
