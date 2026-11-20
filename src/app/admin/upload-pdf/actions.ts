@@ -237,11 +237,18 @@ export async function registerSourceRecord(
 }
 
 // =====================================================
+// =====================================================
 // Analyze book structure (TOC) using Gemini Vision
+// Supports: Standalone Index photo/PDF, or pages from the book
 // =====================================================
 export async function analyzeBookStructureAction(
-  tocPagesInput: { pdfBase64?: string; imagesBase64?: string[]; pageLabels?: number[] },
-  totalPages: number
+  tocPagesInput: { 
+    pdfBase64?: string; 
+    imagesBase64?: string[]; 
+    pageLabels?: number[];
+    isStandaloneIndex?: boolean;
+  },
+  totalPages: number = 0
 ): Promise<{
   success: boolean;
   sections?: Array<{ label: string; chapter: string; lesson: string; startPage: number; endPage: number }>;
@@ -249,32 +256,73 @@ export async function analyzeBookStructureAction(
 }> {
   try {
     const apiKey = process.env.GEMINI_API_KEY;
-    if (!apiKey) throw new Error('GEMINI_API_KEY missing');
+    if (!apiKey) throw new Error('مفتاح Gemini API غير متوفر في إعدادات السيرفر (GEMINI_API_KEY)');
     const ai = new GoogleGenAI({ apiKey });
 
     let parts: Array<{ inlineData: { data: string; mimeType: string } }> = [];
     if (tocPagesInput.pdfBase64) {
       parts = [{ inlineData: { data: tocPagesInput.pdfBase64, mimeType: 'application/pdf' } }];
     } else if (tocPagesInput.imagesBase64 && tocPagesInput.imagesBase64.length > 0) {
-      parts = tocPagesInput.imagesBase64.map((b64) => ({ inlineData: { data: b64, mimeType: 'image/jpeg' } }));
+      parts = tocPagesInput.imagesBase64.map((b64) => {
+        let mimeType = 'image/jpeg';
+        let data = b64;
+        if (b64.startsWith('data:')) {
+          const match = b64.match(/^data:([^;]+);base64,(.+)$/);
+          if (match) {
+            mimeType = match[1];
+            data = match[2];
+          }
+        }
+        return { inlineData: { data, mimeType } };
+      });
     } else {
-      throw new Error('لم يتم إرسال صفحات للتحليل');
+      throw new Error('لم يتم إرسال أي صورة أو صفحة للتحليل');
     }
 
-    // Build page context note for Gemini so it knows exact page numbers of the sent images
+    const isStandalone = tocPagesInput.isStandaloneIndex || totalPages <= 0;
+
     const pageLabels = tocPagesInput.pageLabels;
     const pageContextNote = pageLabels && pageLabels.length > 0
-      ? `ملاحظة هامة جداً: الصور المُرسَلة ليست صفحات متتالية — كل صورة مأخوذة من صفحة محددة في الكتاب الأصلي لاكتشاف فهارس كل الأجزاء. ترتيب أرقام الصفحات المُرسَلة بالتسلسل هو: [${pageLabels.join(', ')}] من إجمالي ${totalPages} صفحة. استخدم هذه الأرقام بدقة عند تحديد startPage لكل فصل أو درس تجده في الفهارس.`
-      : `الصور المُرسَلة هي الصفحات الأولى من الكتاب.`;
+      ? `ملاحظة: الصفحات المُرسَلة مأخوذة من أرقام الصفحات: [${pageLabels.join(', ')}] من إجمالي ${totalPages} صفحة.`
+      : ``;
 
-    const prompt = `أنت محلل محتوى خبير في الكتب المدرسية والمناهج التعليمية المصرية والعربية.
+    const prompt = isStandalone
+      ? `أنت محلل محتوى ومناهج تربوية خبير متخصص في تحليل فهارس وجداول محتويات الكتب المدرسية.
 
-المهمة: اقرأ جدول المحتويات أو الفهرس في الصفحات المرفقة بدقة بالغة، واستخرج الهيكل الكامل والشامل للكتاب بجميع وحداته وفصوله ودروسه.
+المهمة المطلوبة:
+اقرأ صورة أو مستند الفهرس (جدول المحتويات) المرفق بدقة فائقة جداً وبصيرة عالية.
+استخرج الهيكل الكامل والشامل للمنهج والكتاب بجميع وحداته وفصوله ودروسه كما هي مكتوبة في الفهرس حرفياً وبلا أي نقص أو اختصار.
 
 قواعد صارمة ومشددة:
-1. استخرج كل وحدة، وكل فصل داخل الوحدة، وكل درس داخل الفصل بالتفصيل بلا أي اختصار.
-2. ⚠️ اسم الفصل (chapter): يجب أن يكون الاسم الحقيقي والكامل للفصل/الوحدة (مثال: "الفصل الأول: التيار الكهربي وقانون أوم وقانوني كيرشوف" أو "الوحدة الثانية: الغلاف الجوي").
-3. ⚠️ اسم الدرس (lesson): يجب أن يكون اسم الدرس أو الموضوع العلمي المحدد المكتوب في الفهرس (مثال: "الدرس الأول: التيار الكهربي وقانون أوم").
+1. ⚠️ استخرج جميع الوحدات (الوحدة الأولى، الوحدة الثانية...) وجميع الدروس داخل كل وحدة بالتفصيل والترتيب المنهجي الكامل (مثال: إذا كان في الفهرس 14 درساً، يجب استخراج الـ 14 درساً جميعاً دون تفويت أي درس).
+2. ⚠️ اسم الفصل / الوحدة (chapter): الاسم الكامل كما هو في الفهرس (مثال: "الوحدة الأولى: النظام البيئي المائي").
+3. ⚠️ اسم الدرس (lesson): اسم الموضوع أو الدرس المحدد بدقة (مثال: "الدرس الأول: الغلاف المائي على كوكب الأرض"، "الدرس الثاني: الخواص الكيميائية للماء").
+4. 🚫 ممنوع منعاً باتاً وضع (الجزء X) أو أرقام صفحات في خانة اسم الفصل أو الدرس.
+5. أرقام الصفحات (startPage و endPage):
+   - إذا كانت أرقام الصفحات مكتوبة بجوار الدروس في الفهرس، استخرج رقم صفحة البداية ورقم النهاية بدقة.
+   - إذا لم تكن أرقام الصفحات مكتوبة أو غير ظاهرة، اجعل startPage: 1 و endPage: 1.
+
+يجب أن يكون الناتج بصيغة JSON حصراً بهذا المخطط:
+{
+  "sections": [
+    {
+      "label": "الوحدة الأولى: النظام البيئي المائي › الدرس الأول: الغلاف المائي على كوكب الأرض",
+      "chapter": "الوحدة الأولى: النظام البيئي المائي",
+      "lesson": "الدرس الأول: الغلاف المائي على كوكب الأرض",
+      "startPage": 1,
+      "endPage": 20
+    }
+  ]
+}`
+      : `أنت محلل محتوى خبير في الكتب المدرسية والمناهج التعليمية المصرية والعربية.
+
+المهمة: اقرأ جدول المحتويات أو الفهرس في الصفحات المرفقة بدقة بالغة، واستخرج الهيكل الكامل والشامل للكتاب بجميع وحداته وفصوله ودروسه.
+${pageContextNote}
+
+قواعد صارمة ومشددة:
+1. استخرج كل وحدة، وكل فصل داخل الوحدة، وكل درس داخل الفصل بالتفصيل بلا أي اختصار أو تفويت.
+2. ⚠️ اسم الفصل (chapter): يجب أن يكون الاسم الحقيقي والكامل للفصل/الوحدة (مثال: "الوحدة الأولى: النظام البيئي المائي" أو "الفصل الأول: التيار الكهربي وقانون أوم").
+3. ⚠️ اسم الدرس (lesson): يجب أن يكون اسم الدرس أو الموضوع العلمي المحدد المكتوب في الفهرس (مثال: "الدرس الأول: الغلاف المائي على كوكب الأرض").
 4. 🚫 ممنوع منعاً باتاً وقاطعاً وضع (الجزء X) أو (ص X-Y) أو أرقام الصفحات كاسم فصل أو درس.
 5. أرقام الصفحات:
    - startPage: هو رقم الصفحة المكتوب في الفهرس كبداية لهذا الدرس.
@@ -285,9 +333,9 @@ export async function analyzeBookStructureAction(
 {
   "sections": [
     {
-      "label": "الفصل الأول: التيار الكهربي - الدرس الأول: التيار الكهربي وقانون أوم",
-      "chapter": "الفصل الأول: التيار الكهربي وقانون أوم وقانوني كيرشوف",
-      "lesson": "الدرس الأول: التيار الكهربي وقانون أوم",
+      "label": "الوحدة الأولى: النظام البيئي المائي › الدرس الأول: الغلاف المائي على كوكب الأرض",
+      "chapter": "الوحدة الأولى: النظام البيئي المائي",
+      "lesson": "الدرس الأول: الغلاف المائي على كوكب الأرض",
       "startPage": 1,
       "endPage": 37
     }
@@ -312,16 +360,16 @@ export async function analyzeBookStructureAction(
       }
     }
 
-    if (!responseText) throw new Error(lastError?.message || 'فشل تحليل هيكل الكتاب');
+    if (!responseText) throw new Error(lastError?.message || 'فشل تحليل هيكل وفهرس الكتاب');
 
     const parsed = JSON.parse(responseText);
     const sections = parsed.sections || [];
-    if (!sections.length) throw new Error('لم يتم اكتشاف أي فصول أو دروس في الصفحات المُرسَلة');
+    if (!sections.length) throw new Error('لم يتم اكتشاف أي فصول أو دروس في الصورة أو الصفحات المُرسَلة');
 
     return { success: true, sections };
   } catch (err: any) {
     console.error('analyzeBookStructureAction error:', err);
-    return { success: false, error: err.message || 'تعذر تحليل هيكل الكتاب' };
+    return { success: false, error: err.message || 'تعذر تحليل هيكل وفهرس الكتاب' };
   }
 }
 

@@ -14,6 +14,11 @@ import {
   Check,
   BookOpen,
   Sparkles,
+  Image as ImageIcon,
+  Plus,
+  Trash2,
+  X,
+  ListOrdered,
 } from 'lucide-react';
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
@@ -73,9 +78,65 @@ export default function AdminUploadPDFPage() {
   const [structureMode, setStructureMode] = useState<'smart' | 'fixed'>('fixed');
   const [bookSections, setBookSections] = useState<any[]>([]);
 
+  // Dedicated Index (TOC) file & manual management
+  const [indexFile, setIndexFile] = useState<File | null>(null);
+  const [indexPreviewUrl, setIndexPreviewUrl] = useState<string | null>(null);
+  const [isAnalyzingIndex, setIsAnalyzingIndex] = useState(false);
+  const [showAddLessonModal, setShowAddLessonModal] = useState(false);
+  const [newLessonChapter, setNewLessonChapter] = useState('');
+  const [newLessonName, setNewLessonName] = useState('');
+
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
   const supabase = createClient();
+
+  // Helper to map and rebuild chunks with confirmed sections
+  const rebuildChunksWithSections = (sections: any[], pages: number, activeChunkSize: number) => {
+    if (pages <= 0) return;
+    const mappedChunks: ChunkInfo[] = [];
+    let cIdx = 0;
+    const hasRealisticPages = sections.some((s: any) => (s.endPage || 0) > 1 && s.startPage !== s.endPage);
+
+    for (let i = 1; i <= pages; i += activeChunkSize) {
+      const start = i;
+      const end = Math.min(i + activeChunkSize - 1, pages);
+
+      let matchedSec: any = null;
+      if (hasRealisticPages) {
+        matchedSec = sections.find((s: any) => start >= s.startPage && start <= s.endPage)
+          || sections.find((s: any) => end >= s.startPage && end <= s.endPage)
+          || sections.find((s: any) => (start <= s.startPage && end >= s.endPage));
+      }
+
+      if (!matchedSec && sections.length > 0) {
+        // Distribute proportionally across confirmed lessons
+        const secIdx = Math.min(
+          Math.floor(((start - 1) / pages) * sections.length),
+          sections.length - 1
+        );
+        matchedSec = sections[secIdx];
+      }
+
+      const chName = matchedSec?.chapter || selectedSubject || 'الوحدة الأولى';
+      const lesName = matchedSec?.lesson || 'الدرس الأول';
+
+      mappedChunks.push({
+        index: cIdx,
+        startPage: start,
+        endPage: end,
+        status: 'pending',
+        chapter: chName,
+        lesson: lesName,
+        label: `${chName} › ${lesName}`,
+      });
+      cIdx++;
+    }
+
+    setChunks(mappedChunks);
+    setCurrentChunkIndex(0);
+    setTotalExtractedQuestions(0);
+    setStructureMode('smart');
+  };
 
   useEffect(() => {
     async function loadTeachers() {
@@ -120,30 +181,137 @@ export default function AdminUploadPDFPage() {
           setChunkSize(3);
         }
 
-        // Generate default fixed-size chunks (shown as fallback)
-        const generatedChunks: ChunkInfo[] = [];
-        let chunkIndex = 0;
-        for (let i = 1; i <= pages; i += activeChunkSize) {
-          generatedChunks.push({
-            index: chunkIndex,
-            startPage: i,
-            endPage: Math.min(i + activeChunkSize - 1, pages),
-            status: 'pending',
+        // If index/sections were already uploaded/analyzed, rebuild chunks immediately!
+        if (bookSections.length > 0) {
+          rebuildChunksWithSections(bookSections, pages, activeChunkSize);
+          setStatusMsg({
+            type: 'success',
+            text: `✅ تم تحميل الكتاب (${pages} صفحة)، وتم تطبيق هيكل الفهرس المعتمد (${bookSections.length} درس) بنجاح!`,
           });
-          chunkIndex++;
+        } else {
+          // Generate default fixed-size chunks (shown as fallback)
+          const generatedChunks: ChunkInfo[] = [];
+          let chunkIndex = 0;
+          for (let i = 1; i <= pages; i += activeChunkSize) {
+            generatedChunks.push({
+              index: chunkIndex,
+              startPage: i,
+              endPage: Math.min(i + activeChunkSize - 1, pages),
+              status: 'pending',
+            });
+            chunkIndex++;
+          }
+          setChunks(generatedChunks);
+          setCurrentChunkIndex(0);
+          setTotalExtractedQuestions(0);
+          setStructureMode('fixed');
+          setStatusMsg({
+            type: 'success',
+            text: `✅ تم تحميل المستند (${pages} صفحة). يمكنك تحليل الفهرس من قسم الفهرسة أدناه لمطابقة الأسئلة تلقائياً.`,
+          });
         }
-        setChunks(generatedChunks);
-        setCurrentChunkIndex(0);
-        setTotalExtractedQuestions(0);
-        setStructureMode('fixed');
-        setStatusMsg({
-          type: 'success',
-          text: `✅ تم تحميل المستند (${pages} صفحة). اضغط "تحليل هيكل الكتاب ذكياً" ليكتشف الفصول والدروس تلقائياً، أو ابدأ بالتقسيم الثابت مباشرة.`,
-        });
       } catch (err: any) {
         console.error('Error reading PDF:', err);
         setStatusMsg({ type: 'error', text: 'تعذر قراءة ملف الـ PDF. تأكد من سلامة الملف.' });
       }
+    }
+  };
+
+  // Dedicated Index file picker & analysis
+  const handleIndexFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    if (e.target.files && e.target.files[0]) {
+      const f = e.target.files[0];
+      setIndexFile(f);
+      if (f.type.startsWith('image/')) {
+        setIndexPreviewUrl(URL.createObjectURL(f));
+      } else {
+        setIndexPreviewUrl(null);
+      }
+    }
+  };
+
+  const handleAnalyzeIndexFile = async () => {
+    if (!indexFile) return;
+    setIsAnalyzingIndex(true);
+    setStatusMsg({ type: 'success', text: '🔍 جاري قراءة وتحليل صورة/ملف الفهرس بالذكاء الاصطناعي بدقة فائقة...' });
+
+    try {
+      let payload: { pdfBase64?: string; imagesBase64?: string[]; isStandaloneIndex?: boolean } = {
+        isStandaloneIndex: true,
+      };
+
+      if (indexFile.type === 'application/pdf') {
+        const arrayBuffer = await indexFile.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        payload.pdfBase64 = btoa(binary);
+      } else {
+        const arrayBuffer = await indexFile.arrayBuffer();
+        const bytes = new Uint8Array(arrayBuffer);
+        let binary = '';
+        for (let i = 0; i < bytes.byteLength; i++) {
+          binary += String.fromCharCode(bytes[i]);
+        }
+        const mime = indexFile.type || 'image/jpeg';
+        const b64 = `data:${mime};base64,${btoa(binary)}`;
+        payload.imagesBase64 = [b64];
+      }
+
+      const result = await analyzeBookStructureAction(payload, totalPages);
+      if (!result.success || !result.sections || result.sections.length === 0) {
+        throw new Error(result.error || 'لم يتم العثور على أي فصول أو دروس في الفهرس');
+      }
+
+      setBookSections(result.sections);
+      if (totalPages > 0) {
+        rebuildChunksWithSections(result.sections, totalPages, chunkSize);
+      }
+
+      setStatusMsg({
+        type: 'success',
+        text: `✨ رائع جداً! تم استخراج (${result.sections.length}) درساً من الفهرس بالكامل، وتم اعتمادها لربط جميع أسئلة الكتاب بدقة تامة!`,
+      });
+    } catch (err: any) {
+      console.error('Index analysis failed:', err);
+      setStatusMsg({
+        type: 'error',
+        text: `تعذر تحليل الفهرس: ${err.message}`,
+      });
+    } finally {
+      setIsAnalyzingIndex(false);
+    }
+  };
+
+  const handleAddManualLesson = () => {
+    if (!newLessonName.trim()) return;
+    const ch = newLessonChapter.trim() || 'الوحدة الأولى';
+    const les = newLessonName.trim();
+    const updated = [
+      ...bookSections,
+      {
+        chapter: ch,
+        lesson: les,
+        label: `${ch} › ${les}`,
+        startPage: 1,
+        endPage: 1,
+      }
+    ];
+    setBookSections(updated);
+    if (totalPages > 0) {
+      rebuildChunksWithSections(updated, totalPages, chunkSize);
+    }
+    setNewLessonName('');
+    setShowAddLessonModal(false);
+  };
+
+  const handleRemoveSection = (idx: number) => {
+    const updated = bookSections.filter((_, i) => i !== idx);
+    setBookSections(updated);
+    if (totalPages > 0) {
+      rebuildChunksWithSections(updated, totalPages, chunkSize);
     }
   };
 
@@ -639,9 +807,188 @@ export default function AdminUploadPDFPage() {
           </div>
         </div>
 
+        {/* ========================================================================= */}
+        {/* 📋 Dedicated Table of Contents (TOC) Section - فهرسة الكتاب والدروس */}
+        {/* ========================================================================= */}
+        <div className="border border-indigo-200 bg-indigo-50/50 rounded-2xl p-5 space-y-4">
+          <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 border-b border-indigo-100 pb-3">
+            <div className="flex items-center gap-3">
+              <div className="w-10 h-10 rounded-xl bg-indigo-600 text-white flex items-center justify-center shadow-sm shrink-0">
+                <ListOrdered className="w-5 h-5" />
+              </div>
+              <div>
+                <h3 className="text-sm font-bold text-indigo-950 flex items-center gap-2">
+                  <span>فهرس الكتاب والدروس المعتمدة</span>
+                  <span className="text-[11px] font-semibold bg-indigo-100 text-indigo-700 px-2 py-0.5 rounded-full">
+                    موصى به لدقة 100%
+                  </span>
+                </h3>
+                <p className="text-xs text-indigo-700/80 mt-0.5">
+                  ارفع صورة الفهرس أو صفحة الفهرس (مثل صورة من الهاتف) ليقوم الذكاء الاصطناعي باستخراج وتأكيد جميع الدروس بدقة متناهية.
+                </p>
+              </div>
+            </div>
+
+            <div className="flex items-center gap-2 shrink-0">
+              <button
+                type="button"
+                onClick={() => setShowAddLessonModal(!showAddLessonModal)}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-white border border-indigo-200 text-indigo-700 hover:bg-indigo-50 text-xs font-bold rounded-lg transition"
+              >
+                <Plus className="w-3.5 h-3.5" />
+                <span>إضافة درس يدوياً</span>
+              </button>
+            </div>
+          </div>
+
+          {/* Upload index image or file */}
+          <div className="grid grid-cols-1 sm:grid-cols-12 gap-3 items-center">
+            <div className="sm:col-span-8">
+              <div className="border border-dashed border-indigo-300 hover:border-indigo-500 rounded-xl p-3 bg-white text-center cursor-pointer relative transition">
+                <input
+                  type="file"
+                  accept="image/*,.pdf"
+                  disabled={isAnalyzingIndex || isProcessing}
+                  onChange={handleIndexFileChange}
+                  className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                />
+                <div className="flex items-center justify-center gap-3">
+                  {indexPreviewUrl ? (
+                    <img src={indexPreviewUrl} alt="Index Preview" className="w-12 h-12 object-cover rounded-lg border border-indigo-200" />
+                  ) : (
+                    <ImageIcon className="w-7 h-7 text-indigo-400 shrink-0" />
+                  )}
+                  <div className="text-right">
+                    <span className="text-xs font-bold text-slate-800 block">
+                      {indexFile ? indexFile.name : 'اضغط لاختيار صورة الفهرس (PNG, JPG) أو ملف PDF للفهرس'}
+                    </span>
+                    <span className="text-[11px] text-slate-500 block">
+                      {indexFile ? `${(indexFile.size / 1024).toFixed(0)} KB` : 'يدعم صور الهاتف والاسكانر وصفحات الفهرس'}
+                    </span>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <div className="sm:col-span-4">
+              <button
+                type="button"
+                disabled={!indexFile || isAnalyzingIndex || isProcessing}
+                onClick={handleAnalyzeIndexFile}
+                className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white font-bold text-xs rounded-xl shadow-sm transition"
+              >
+                {isAnalyzingIndex ? (
+                  <>
+                    <Loader2 className="w-4 h-4 animate-spin" />
+                    <span>جاري قراءة الفهرس...</span>
+                  </>
+                ) : (
+                  <>
+                    <Sparkles className="w-4 h-4" />
+                    <span>تحليل الفهرس ذكياً</span>
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* Manual Add Lesson Form Modal / Inline */}
+          {showAddLessonModal && (
+            <div className="p-3 bg-white border border-indigo-200 rounded-xl space-y-3">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-slate-800">إضافة درس جديد إلى الفهرس المعتمد</span>
+                <button
+                  type="button"
+                  onClick={() => setShowAddLessonModal(false)}
+                  className="text-slate-400 hover:text-slate-600 text-xs font-bold"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">اسم الوحدة / الفصل</label>
+                  <input
+                    type="text"
+                    value={newLessonChapter}
+                    onChange={(e) => setNewLessonChapter(e.target.value)}
+                    placeholder="مثال: الوحدة الأولى: النظام البيئي المائي"
+                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                  />
+                </div>
+                <div>
+                  <label className="block text-[11px] font-semibold text-slate-600 mb-1">اسم الدرس</label>
+                  <input
+                    type="text"
+                    value={newLessonName}
+                    onChange={(e) => setNewLessonName(e.target.value)}
+                    placeholder="مثال: الغلاف المائي على كوكب الأرض"
+                    className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
+                  />
+                </div>
+              </div>
+              <div className="flex justify-end gap-2">
+                <button
+                  type="button"
+                  onClick={() => setShowAddLessonModal(false)}
+                  className="px-3 py-1 text-xs text-slate-600 hover:bg-slate-100 rounded-lg"
+                >
+                  إلغاء
+                </button>
+                <button
+                  type="button"
+                  onClick={handleAddManualLesson}
+                  className="px-3 py-1 bg-indigo-600 text-white font-bold text-xs rounded-lg hover:bg-indigo-700"
+                >
+                  حفظ وإضافة
+                </button>
+              </div>
+            </div>
+          )}
+
+          {/* List of Extracted / Confirmed Lessons */}
+          {bookSections.length > 0 && (
+            <div className="pt-2 border-t border-indigo-100 space-y-2">
+              <div className="flex items-center justify-between">
+                <span className="text-xs font-bold text-indigo-950 flex items-center gap-1.5">
+                  <CheckCircle className="w-4 h-4 text-emerald-600" />
+                  <span>الدروس المعتمدة في هذا الكتاب ({bookSections.length} درس):</span>
+                </span>
+                <span className="text-[11px] font-semibold text-emerald-700 bg-emerald-50 border border-emerald-200 px-2 py-0.5 rounded-md">
+                  جاهز لمطابقة الأسئلة تلقائياً
+                </span>
+              </div>
+              <div className="flex flex-wrap gap-1.5 max-h-48 overflow-y-auto pr-1">
+                {bookSections.map((sec, i) => (
+                  <div
+                    key={i}
+                    className="flex items-center gap-1.5 bg-white border border-indigo-200 px-2.5 py-1 rounded-lg text-xs text-indigo-900 font-medium shadow-2xs group"
+                  >
+                    <span className="font-bold text-indigo-600 text-[11px]">{i + 1}.</span>
+                    <span className="font-semibold text-indigo-950">{sec.chapter}</span>
+                    <span className="text-slate-400">›</span>
+                    <span>{sec.lesson}</span>
+                    {sec.startPage && sec.endPage && sec.endPage > 1 && (
+                      <span className="text-[10px] text-slate-400 font-mono">(ص {sec.startPage}-{sec.endPage})</span>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleRemoveSection(i)}
+                      className="opacity-40 group-hover:opacity-100 hover:text-red-600 text-slate-400 mr-1 transition"
+                      title="حذف هذا الدرس"
+                    >
+                      <X className="w-3 h-3" />
+                    </button>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
+
         {/* File Picker */}
         <div>
-          <label className="block text-xs font-semibold text-slate-700 mb-2">اختر ملف PDF (حتى 300+ صفحة)</label>
+          <label className="block text-xs font-semibold text-slate-700 mb-2">اختر ملف PDF لكتاب المادة (حتى 300+ صفحة)</label>
           <div className="border-2 border-dashed border-slate-300 hover:border-blue-500 rounded-2xl p-6 text-center bg-slate-50 transition cursor-pointer relative">
             <input
               type="file"
