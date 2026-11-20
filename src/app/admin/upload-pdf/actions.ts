@@ -26,7 +26,8 @@ async function extractQuestionsMultimodal(
   defaultChapterName: string,
   sourceName: string,
   targetChapter?: string,
-  targetLesson?: string
+  targetLesson?: string,
+  allBookSections?: Array<{ chapter: string; lesson: string; startPage: number; endPage: number }>
 ): Promise<any[]> {
   const apiKey = process.env.GEMINI_API_KEY;
   if (!apiKey) {
@@ -42,34 +43,40 @@ async function extractQuestionsMultimodal(
     : (!isGenericOrChunk(defaultChapterName) ? defaultChapterName : (subject || 'الفصل الأول'));
   const lessonContext = !isGenericOrChunk(targetLesson) ? targetLesson! : 'الدرس الأول';
 
+  // Build lessons reference menu for the prompt if book sections exist
+  const lessonsMenu = allBookSections && allBookSections.length > 0
+    ? `\nقائمة الفصول والدروس الرسمية المعتمدة لهذا الكتاب:\n${allBookSections.map((s, idx) => `${idx + 1}. [${s.chapter}] -> ${s.lesson}`).join('\n')}\n`
+    : '';
+
   const prompt = `أنت خبير تربوي وموجّه أول متخصص في تحليل المناهج والكتب المدرسية واستخراج بنوك الأسئلة بدقة فائقة.
 
 المهمة: استخرج جميع الأسئلة والتمارين والتدريبات الموجودة في هذا الجزء مع تفكيك وتصنيف دقيق لكل سؤال.
 ملاحظة هامة: قد يحتوي الملف على صفحات شرح ونظري ومقدمات؛ تجاهل صفحات الشرح تماماً ولا تستخرج منها أي نص، وركّز فقط وحصراً على استخراج الأسئلة الفعلية والتدريبات واختبارات الفصول ونماذج الامتحانات إن وجدت. وإذا لم تجد أي أسئلة في هذا الجزء، أرجع قائمة أسئلة فارغة [] بكل بساطة دون أي خطأ.
 
-السياق الدراسي والمنهجي المحدد لهذا الجزء من الكتاب:
-- الفصل / الوحدة الرئيسية: "${chapterContext}"
-- الدرس / الموضوع الفرعي: "${lessonContext}"
-
+السياق الدراسي والمنهجي المتوقع لهذا الجزء من الصفحات:
+- الفصل / الوحدة المبدئية: "${chapterContext}"
+- الدرس / الموضوع المبدئي: "${lessonContext}"
+${lessonsMenu}
 التعليمات الصارمة والمشددة:
 1. استخراج نص السؤال: استخرج نص السؤال كاملاً كما هو مكتوب في الكتاب دون اختصار.
-2. ⚠️ تصنيف الفصل (chapter):
-   - يجب أن يكون اسم الفصل هو: "${chapterContext}" (أو اسم الوحدة/الباب الحقيقي من ترويسة الصفحة).
-   - 🚫 ممنوع منعاً باتاً وقاطعاً وضع (الجزء X) أو (ص X-Y) أو أي إشارة لأرقام الأجزاء أو أرقام الصفحات كاسم فصل! يجب أن يكون اسماً تعليمياً حقيقياً يظهر في بنك الأسئلة.
-3. ⚠️ تصنيف الدرس (lesson):
-   - يجب أن يكون اسم الدرس هو: "${lessonContext}" أو الموضوع العلمي المحدد الدقيق المذكور في ترويسة الدرس.
-   - 🚫 ممنوع منعاً باتاً تسمية الدرس برقم الجزء أو أرقام الصفحات.
-4. نوع السؤال (question_type):
+2. ⚠️ تصنيف الفصل (chapter) والدرس (lesson):
+   - اقرأ ترويسة الصفحة وعنوان السؤال ومحتواه العلمي بدقة.
+   - إذا كان ترويسة الصفحة أو موضوع السؤال ينتمي لدرس محدد من القائمة المعتمدة أعلاه، صنفه فوراً بالاسم الدقيق لذلك الدرس وفصله.
+   - في حال عدم وضوح درس مختلف، استخدم:
+     * chapter: "${chapterContext}"
+     * lesson: "${lessonContext}"
+   - 🚫 ممنوع منعاً باتاً وقاطعاً وضع (الجزء X) أو (ص X-Y) أو أي إشارة لأرقام الأجزاء أو أرقام الصفحات كاسم فصل أو درس!
+3. نوع السؤال (question_type):
    - mcq: اختيار من متعدد
    - essay: أسئلة مقالية، علل، ما النتائج المترتبة، مسائل حسابية
    - true_false: صح أو خطأ
-5. مستوى الصعوبة التربوي (difficulty):
+4. مستوى الصعوبة التربوي (difficulty):
    - easy: أسئلة التذكر والمفاهيم المباشرة البسيطة.
    - medium: أسئلة الفهم والتطبيق الحسابي المعتاد.
    - hard: أسئلة مستويات التفكير العليا، والمسائل المركبة، وأسئلة الفائقين.
-6. إذا كان السؤال اختياراً من متعدد (mcq)، استخرج جميع الخيارات مع كود الخيار (أ، ب، ج، د)، وحدد الخيار الصحيح بـ is_correct: true.
+5. إذا كان السؤال اختياراً من متعدد (mcq)، استخرج جميع الخيارات مع كود الخيار (أ، ب، ج، د)، وحدد الخيار الصحيح بـ is_correct: true.
 
-7. ⚠️ قاعدة صارمة جداً بخصوص الصور والرسومات (has_image):
+6. ⚠️ قاعدة صارمة جداً بخصوص الصور والرسومات (has_image):
    - إذا كان السؤال نصياً فقط (سواء كان معه خيارات أو بدون) ولا يحتوي على رسم، يُمنع منعاً باتاً استخراج أو قص صورة له! اجعل السؤال نصاً كاملاً فقط مع خياراته، وضع has_image: false و image_box: null.
    - استخرج صورة فقط وفقط وحصراً إذا كان السؤال يحتوي على: رسم بياني، أو دائرة كهربية، أو شكل هندسي، أو خريطة، أو جهاز تجريبي، أو رسمة علمية لا يمكن فهم السؤال بدونها!
    - في حال وجود رسمة توضيحية، حدد إحداثيات صندوق الرسمة فقط (وليس نص السؤال ولا الخيارات) بدقة [ymin, xmin, ymax, xmax] حيث القيم بين 0 و 1000. ورقم الصفحة يبدأ من 1.
@@ -324,7 +331,8 @@ export async function extractQuestionsFromChunkAction(
   sourceName: string,
   chunkLabel: string,
   targetChapter?: string,
-  targetLesson?: string
+  targetLesson?: string,
+  allBookSections?: Array<{ chapter: string; lesson: string; startPage: number; endPage: number }>
 ) {
   try {
     let parts: Array<{ inlineData: { data: string; mimeType: string } }> = [];
@@ -350,7 +358,8 @@ export async function extractQuestionsFromChunkAction(
       chunkLabel,
       sourceName,
       targetChapter,
-      targetLesson
+      targetLesson,
+      allBookSections
     );
 
     return {

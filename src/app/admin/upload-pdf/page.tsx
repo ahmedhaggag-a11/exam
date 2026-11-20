@@ -384,7 +384,8 @@ export default function AdminUploadPDFPage() {
         sourceName || file.name,
         chunkLabel,
         chunk.chapter,
-        chunk.lesson
+        chunk.lesson,
+        bookSections
       );
 
       if (!extractRes || extractRes.success === false) {
