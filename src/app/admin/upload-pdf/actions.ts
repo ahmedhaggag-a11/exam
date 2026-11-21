@@ -635,6 +635,7 @@ export async function saveQuestionsBulk(
       const questionRow = {
         teacher_id: teacherId,
         source_id: sourceId,
+        source_page: q.source_page || q.page_number || null,
         text: q.text,
         question_type: q.question_type || 'mcq',
         difficulty: q.difficulty || 'medium',
@@ -701,5 +702,63 @@ export async function uploadImageFromBase64(base64Data: string, teacherId: strin
   } catch (err) {
     console.error('Error uploading image:', err);
     return null;
+  }
+}
+
+/**
+ * Create a signed upload URL to upload the source PDF directly to Supabase storage.
+ */
+export async function getSignedPdfUploadUrlAction(
+  sourceId: string,
+  fileName: string
+): Promise<{ success: boolean; signedUrl?: string; token?: string; path?: string; error?: string }> {
+  try {
+    const cleanFileName = fileName.replace(/[^a-zA-Z0-9._\-\u0600-\u06FF]/g, '_');
+    const storagePath = `sources/${sourceId}_${cleanFileName}`;
+
+    const { data, error } = await supabaseAdmin.storage
+      .from('pdfs')
+      .createSignedUploadUrl(storagePath);
+
+    if (error || !data) throw new Error(error?.message || 'تعذر إنشاء رابط رفع الملف');
+
+    return {
+      success: true,
+      signedUrl: data.signedUrl,
+      token: data.token,
+      path: storagePath,
+    };
+  } catch (err: any) {
+    console.error('getSignedPdfUploadUrlAction error:', err);
+    return { success: false, error: err.message || 'فشل تجهيز مساحة رفع الكتاب' };
+  }
+}
+
+/**
+ * Update the source record with its verified storage path and public URL.
+ */
+export async function updateSourceStoragePathAction(
+  sourceId: string,
+  storagePath: string
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    const { data: urlData } = supabaseAdmin.storage.from('pdfs').getPublicUrl(storagePath);
+    const publicUrl = urlData?.publicUrl || 'https://supabase.co';
+
+    const { error } = await supabaseAdmin
+      .from('sources')
+      .update({
+        storage_path: storagePath,
+        file_url: publicUrl,
+        status: 'completed',
+      })
+      .eq('id', sourceId);
+
+    if (error) throw new Error(error.message);
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('updateSourceStoragePathAction error:', err);
+    return { success: false, error: err.message || 'فشل تحديث بيانات المصدر' };
   }
 }

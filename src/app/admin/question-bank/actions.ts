@@ -79,7 +79,7 @@ export async function getSourcePdfUrlAction(
 
     if (error || !data) throw new Error(error?.message || 'المصدر غير موجود');
 
-    // Try to get a signed URL (60 min expiry) for the PDF
+    // Try to get a signed URL (60 min expiry) or public URL for the PDF
     if (data.storage_path) {
       const { data: signed, error: signErr } = await supabaseAdmin.storage
         .from('pdfs')
@@ -87,6 +87,13 @@ export async function getSourcePdfUrlAction(
 
       if (!signErr && signed?.signedUrl) {
         return { success: true, url: signed.signedUrl, storagePath: data.storage_path };
+      }
+
+      const { data: pubData } = supabaseAdmin.storage
+        .from('pdfs')
+        .getPublicUrl(data.storage_path);
+      if (pubData?.publicUrl) {
+        return { success: true, url: pubData.publicUrl, storagePath: data.storage_path };
       }
     }
 

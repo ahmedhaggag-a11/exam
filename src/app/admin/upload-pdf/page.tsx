@@ -29,6 +29,8 @@ import {
   saveQuestionsBulk, 
   uploadImageFromBase64,
   analyzeBookStructureAction,
+  getSignedPdfUploadUrlAction,
+  updateSourceStoragePathAction,
 } from './actions';
 import { cachePdfFile } from '@/lib/utils/pdf-cache';
 
@@ -452,6 +454,34 @@ export default function AdminUploadPDFPage() {
     }
   };
 
+  // Upload source PDF in background to Supabase Storage and cache locally
+  const uploadSourcePdfInBackground = async (sourceId: string, pdfFile: File) => {
+    try {
+      // 1. Cache in browser IndexedDB under sourceId for immediate access
+      const buf = await pdfFile.arrayBuffer();
+      await cachePdfFile(sourceId, buf);
+
+      // 2. Upload to Supabase Storage via signed URL
+      const signedRes = await getSignedPdfUploadUrlAction(sourceId, pdfFile.name);
+      if (signedRes.success && signedRes.path && signedRes.token) {
+        const { error: upErr } = await supabase.storage
+          .from('pdfs')
+          .uploadToSignedUrl(signedRes.path, signedRes.token, pdfFile, {
+            contentType: 'application/pdf',
+          });
+
+        if (!upErr) {
+          await updateSourceStoragePathAction(sourceId, signedRes.path);
+          console.log(`[ExamForge] Book PDF successfully uploaded to storage: ${signedRes.path}`);
+        } else {
+          console.warn('[ExamForge] uploadToSignedUrl error:', upErr);
+        }
+      }
+    } catch (err) {
+      console.warn('[ExamForge] Error uploading source PDF in background:', err);
+    }
+  };
+
   // Process a specific chunk
   const processChunk = async (chunkIdx: number) => {
     if (!file || !selectedTeacherId) return;
@@ -486,6 +516,11 @@ export default function AdminUploadPDFPage() {
         }
         activeSourceId = srcRes.sourceData.id;
         setSourceRecordId(activeSourceId);
+
+        // Upload original PDF book to Supabase Storage in background & cache locally
+        if (activeSourceId) {
+          uploadSourcePdfInBackground(activeSourceId, file);
+        }
       }
 
       // 2. Prepare chunk payload using the loaded PDF.js document directly
@@ -528,18 +563,17 @@ export default function AdminUploadPDFPage() {
 
       const extractedQs = Array.isArray(extractRes.questions) ? extractRes.questions : [];
 
-      // 4. Crop images if any (reusing doc safely without re-parsing buffer)
-      const questionsWithImages = extractedQs.filter(
-        (q: any) => q.has_image && q.image_page_number && q.image_box
-      );
-
-      if (questionsWithImages.length > 0 && doc) {
+      // 4. Crop images if any & record exact source_page for EVERY question
+      if (doc) {
         for (let i = 0; i < extractedQs.length; i++) {
           const q = extractedQs[i];
+          const absPageNum = q.image_page_number
+            ? (chunk.startPage + q.image_page_number - 1)
+            : chunk.startPage;
+          q.source_page = Math.min(Math.max(1, absPageNum), doc.numPages);
+
           if (q.has_image && q.image_page_number && q.image_box) {
-            // Absolute page number in the original book
-            const absPageNum = chunk.startPage + (q.image_page_number - 1);
-            const pageNum = Math.min(Math.max(1, absPageNum), doc.numPages);
+            const pageNum = q.source_page;
             const base64Img = await cropImageFromPdf(doc, pageNum, q.image_box);
             if (base64Img) {
               const url = await uploadImageFromBase64(base64Img, selectedTeacherId);
