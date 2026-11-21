@@ -440,7 +440,11 @@ export default function ExamPrintPage() {
                   { label: '4', val: 4 },
                   { label: '5', val: 5 },
                   { label: '6', val: 6 },
+                  { label: '7', val: 7 },
                   { label: '8', val: 8 },
+                  { label: '9', val: 9 },
+                  { label: '10', val: 10 },
+                  { label: '12', val: 12 },
                 ].map((item) => (
                   <button
                     key={item.val}

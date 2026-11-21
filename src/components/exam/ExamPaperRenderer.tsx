@@ -96,7 +96,8 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
         if (count <= 6) return '0.85rem';
         if (count <= 8) return '0.78rem';
         if (count <= 10) return '0.72rem';
-        return '0.675rem';
+        if (count <= 12) return '0.675rem';
+        return '0.64rem';
       } else {
         if (count <= 2) return '1.1rem';
         if (count <= 3) return '1rem';
@@ -104,7 +105,9 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
         if (count <= 5) return '0.825rem';
         if (count <= 6) return '0.775rem';
         if (count <= 8) return '0.72rem';
-        return '0.675rem';
+        if (count <= 10) return '0.66rem';
+        if (count <= 12) return '0.62rem';
+        return '0.6rem';
       }
     }
     // Manual font size fallback
@@ -122,19 +125,21 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
       if (count <= 2) return 'space-y-4 mb-3';
       if (count <= 4) return 'space-y-2.5 mb-2';
       if (count <= 6) return 'space-y-1.5 mb-1.5';
-      return 'space-y-1 mb-1';
+      if (count <= 8) return 'space-y-1 mb-1';
+      return 'space-y-0.5 mb-0.5';
     }
     const spacingClasses: Record<string, string> = {
-      compact: 'space-y-1 mb-1',
-      normal: 'space-y-2 mb-2',
-      spacious: 'space-y-4 mb-4',
+      compact: 'space-y-0.5 mb-0.5',
+      normal: 'space-y-1 mb-1',
+      spacious: 'space-y-3 mb-3',
     };
-    return spacingClasses[config.questions.spacing] || 'space-y-1.5 mb-1.5';
+    return spacingClasses[config.questions.spacing] || 'space-y-1 mb-1';
   };
 
   // Image max height scaling
   const getImageMaxHeightClass = () => {
     const count = qp > 0 ? qp : questions.length;
+    if (count >= 10) return 'max-h-14 sm:max-h-16';
     if (count >= 8) return 'max-h-16 sm:max-h-20';
     if (count >= 6) return 'max-h-20 sm:max-h-24';
     if (count >= 4) return 'max-h-28 sm:max-h-32';
@@ -514,17 +519,17 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
       }
     } else {
       // 1 column:
-      if (totalQs <= 8) {
-        // Up to 8 questions -> fit all on 1 page!
+      if (totalQs <= 10) {
+        // Up to 10 questions -> fit all on 1 page!
         effectiveChunkSize = totalQs;
-      } else if (totalQs <= 14) {
-        // 9 to 14 questions -> balanced on 2 pages! (e.g. 11 -> 6 & 5, 12 -> 6 & 6)
-        effectiveChunkSize = Math.ceil(totalQs / 2);
       } else if (totalQs <= 20) {
-        // 15 to 20 questions -> balanced on 3 pages!
+        // 11 to 20 questions -> balanced on 2 pages! (e.g. 18 -> 9 & 9)
+        effectiveChunkSize = Math.ceil(totalQs / 2);
+      } else if (totalQs <= 30) {
+        // 21 to 30 questions -> balanced on 3 pages!
         effectiveChunkSize = Math.ceil(totalQs / 3);
       } else {
-        const targetPages = Math.ceil(totalQs / 6);
+        const targetPages = Math.ceil(totalQs / 10);
         effectiveChunkSize = Math.ceil(totalQs / targetPages);
       }
     }
