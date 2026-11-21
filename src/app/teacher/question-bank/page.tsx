@@ -13,10 +13,12 @@ import {
   HelpCircle, 
   Gauge, 
   Trash2,
-  Crop 
+  Crop,
+  FolderSync
 } from 'lucide-react';
 import { Question } from '@/types/database';
 import RecropModal from '@/components/RecropModal';
+import MoveQuestionModal from '@/components/MoveQuestionModal';
 
 interface SourceItem {
   id: string;
@@ -42,6 +44,10 @@ export default function TeacherQuestionBankPage() {
   // Re-crop Modal state
   const [recropModalOpen, setRecropModalOpen] = useState(false);
   const [selectedRecropQuestion, setSelectedRecropQuestion] = useState<Question | null>(null);
+
+  // Move Question to Lesson Modal state
+  const [moveModalOpen, setMoveModalOpen] = useState(false);
+  const [selectedMoveQuestion, setSelectedMoveQuestion] = useState<Question | null>(null);
 
   const supabase = createClient();
 
@@ -263,6 +269,31 @@ export default function TeacherQuestionBankPage() {
           return {
             ...q,
             image_urls: [newImageUrl, ...existing.filter((u) => u !== newImageUrl)],
+          };
+        }
+        return q;
+      })
+    );
+  };
+
+  const handleQuestionMoved = (
+    questionId: string,
+    updatedData: {
+      chapter: string;
+      lesson?: string | null;
+      grade_level?: string | null;
+      term?: string | null;
+    }
+  ) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id === questionId) {
+          return {
+            ...q,
+            chapter: updatedData.chapter,
+            lesson: updatedData.lesson || null,
+            ...(updatedData.grade_level ? { grade_level: updatedData.grade_level } : {}),
+            ...(updatedData.term ? { term: updatedData.term } : {}),
           };
         }
         return q;
@@ -516,6 +547,19 @@ export default function TeacherQuestionBankPage() {
                     <button
                       type="button"
                       onClick={() => {
+                        setSelectedMoveQuestion(q);
+                        setMoveModalOpen(true);
+                      }}
+                      className="px-2.5 py-1 text-xs font-bold bg-amber-50 hover:bg-amber-100 text-amber-800 rounded-lg border border-amber-200 flex items-center gap-1.5 transition shrink-0 shadow-2xs"
+                      title="نقل السؤال إلى درس أو فصل آخر في بنك الأسئلة"
+                    >
+                      <FolderSync className="w-3.5 h-3.5 text-amber-600" />
+                      <span>🔁 نقل لدرس آخر</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
                         setSelectedRecropQuestion(q);
                         setRecropModalOpen(true);
                       }}
@@ -614,6 +658,18 @@ export default function TeacherQuestionBankPage() {
             prev.map((q) => (q.id === qId ? { ...q, image_urls: [] } : q))
           );
         }}
+      />
+
+      {/* Interactive Move Question to Lesson Modal */}
+      <MoveQuestionModal
+        isOpen={moveModalOpen}
+        question={selectedMoveQuestion}
+        allQuestions={questions}
+        onClose={() => {
+          setMoveModalOpen(false);
+          setSelectedMoveQuestion(null);
+        }}
+        onQuestionMoved={handleQuestionMoved}
       />
     </div>
   );

@@ -127,3 +127,46 @@ export async function removeQuestionImageAction(
     return { success: false, error: err.message || 'خطأ أثناء حذف الصورة' };
   }
 }
+
+/**
+ * Move a question to a different chapter / lesson (and optionally grade_level / term).
+ */
+export async function moveQuestionLessonAction(
+  questionId: string,
+  data: {
+    chapter: string;
+    lesson?: string | null;
+    grade_level?: string | null;
+    term?: string | null;
+  }
+): Promise<{ success: boolean; error?: string }> {
+  try {
+    if (!questionId) throw new Error('معرف السؤال مفقود');
+    if (!data.chapter || !data.chapter.trim()) throw new Error('يجب تحديد اسم الفصل / الباب');
+
+    const updatePayload: Record<string, any> = {
+      chapter: data.chapter.trim(),
+      lesson: data.lesson && data.lesson.trim() ? data.lesson.trim() : null,
+    };
+
+    if (data.grade_level !== undefined && data.grade_level !== null) {
+      updatePayload.grade_level = data.grade_level;
+    }
+    if (data.term !== undefined && data.term !== null) {
+      updatePayload.term = data.term;
+    }
+
+    const { error: updateErr } = await supabaseAdmin
+      .from('questions')
+      .update(updatePayload)
+      .eq('id', questionId);
+
+    if (updateErr) throw new Error(updateErr.message);
+
+    return { success: true };
+  } catch (err: any) {
+    console.error('moveQuestionLessonAction error:', err);
+    return { success: false, error: err.message || 'خطأ أثناء نقل السؤال للدرس الآخر' };
+  }
+}
+
