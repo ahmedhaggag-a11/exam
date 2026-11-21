@@ -33,7 +33,7 @@ export function generateExamModels(
   modelsCount: number = 4,
   shuffleQuestions: boolean = true,
   shuffleChoices: boolean = true,
-  shuffleNumbers: boolean = true
+  shuffleNumbers: boolean = false
 ): GeneratedExamModel[] {
   const modelCodes = ["A", "B", "C", "D"];
   const modelNamesAr = ["نموذج أ", "نموذج ب", "نموذج ج", "نموذج د"];
@@ -49,7 +49,7 @@ export function generateExamModels(
     let modelQuestions = [...questions];
     const choicesOrderMap: Record<string, string[]> = {};
 
-    if ((shuffleQuestions || shuffleNumbers) && m > 0) {
+    if (shuffleQuestions && m > 0) {
       modelQuestions = shuffleArray(modelQuestions, `exam_model_shuffle_q_${code}_${m * 739}`);
     }
 

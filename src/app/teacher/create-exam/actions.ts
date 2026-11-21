@@ -1,6 +1,7 @@
 'use server';
 
 import { createClient } from '@supabase/supabase-js';
+import { GoogleGenAI } from '@google/genai';
 
 const supabaseAdmin = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -163,4 +164,123 @@ export async function generateExamAction(
     selected_question_ids: selected.slice(0, config.total_questions).map(q => q.id),
     reasoning,
   };
+}
+
+export interface VariedQuestionItem {
+  original_id: string;
+  text: string;
+  choices?: Array<{ choice_code: string; text: string; is_correct: boolean; order_index: number }>;
+  model_answer?: string | null;
+}
+
+/**
+ * AI-powered numerical variation for physics/science calculation questions.
+ * When enabled, models B, C, D get realistically changed numbers, accurately recalculated answers,
+ * and updated choices to prevent students from sharing calculation results.
+ */
+export async function varyModelNumericalQuestionsAction(
+  questions: any[],
+  modelCode: string,
+  modelNameAr: string
+): Promise<{ success: boolean; variations: Record<string, VariedQuestionItem> }> {
+  try {
+    const apiKey = process.env.GEMINI_API_KEY;
+    if (!apiKey) return { success: false, variations: {} };
+
+    // 1. Identify which questions have numbers/calculations
+    const numericalCandidates = questions.filter(q => {
+      const text = q.text || q.question_text || '';
+      return /\d+(\.\d+)?\s*(أوم|فولت|أمبير|جول|نيوتن|متر|سم|ثانية|كيلو|وات|هرتز|كولوم|تسلا|ويبر|V|A|W|Ω|Hz|m|cm|kg|s|K|N|J|C|T|Wb|%)/i.test(text)
+        || (/\d+/.test(text) && /(احسب|أوجد|فإن|قيمة|شدة|مقاومة|طول|زاوية|نسبة|طاقة|كتلة|تساوي|يساوي|مقدار)/.test(text));
+    });
+
+    if (numericalCandidates.length === 0) {
+      return { success: true, variations: {} };
+    }
+
+    // Process in clean batch (up to 12 numerical questions per model)
+    const targetBatch = numericalCandidates.slice(0, 12);
+
+    const questionsPromptPayload = targetBatch.map((q, idx) => ({
+      index: idx + 1,
+      id: q.id,
+      text: q.text || q.question_text,
+      choices: (q.choices || []).map((c: any) => ({
+        code: c.choice_code,
+        text: c.text,
+        is_correct: c.is_correct
+      })),
+      model_answer: q.model_answer || null
+    }));
+
+    const prompt = `أنت خبير واضع امتحانات فيزياء وعلوم ومناهج تعليمية ثانوية عامة.
+المهمة المطلوبة: قم بتغيير الأرقام والمعطيات الحسابية في الأسئلة التالية لتوليد نموذج امتحاني جديد لـ (${modelNameAr} - كود ${modelCode}):
+
+قواعد صارمة ودقيقة 100%:
+1. غير الأرقام المعطاة في نص السؤال إلى أرقام أخرى واقعية وفيزيائية متناسقة وسهلة الحساب (مثل مضاعفة الرقم، أو تغيير معطى مناسب كالجهد أو المقاومة أو الطول أو التردد).
+2. أعد حساب الإجابة الصحيحة رياضياً وفيزيائياً بدقة 100% بناءً على الأرقام الجديدة.
+3. عدل جميع خيارات السؤال (أ، ب، ج، د) بحيث يكون أحدها مطابقاً للناتج الجديد الصحيح تماماً، وباقي الخيارات مشتتات ذكية متناسقة مع الأرقام الجديدة.
+4. إذا كان السؤال مقالياً، حدّث الإجابة النموذجية (model_answer) بالحسابات والناتج الجديد.
+5. حافظ على نفس النص اللغوي والصيغة والمفاهيم العلمية ومستوى الصعوبة بدون أي تغيير في جوهر السؤال.
+
+الأسئلة المطلوب تغيير أرقامها:
+${JSON.stringify(questionsPromptPayload, null, 2)}
+
+أرجع الناتج بصيغة JSON حصراً بهذا المخطط:
+{
+  "variations": [
+    {
+      "id": "معرف_السؤال_الأصلي",
+      "text": "نص السؤال بعد تغيير الأرقام الجديدة",
+      "choices": [
+        { "choice_code": "أ", "text": "...", "is_correct": true, "order_index": 0 },
+        { "choice_code": "ب", "text": "...", "is_correct": false, "order_index": 1 },
+        { "choice_code": "ج", "text": "...", "is_correct": false, "order_index": 2 },
+        { "choice_code": "د", "text": "...", "is_correct": false, "order_index": 3 }
+      ],
+      "model_answer": "الإجابة والناتج الجديد"
+    }
+  ]
+}`;
+
+    const ai = new GoogleGenAI({ apiKey });
+    const CANDIDATE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest'];
+
+    let responseText: string | undefined;
+    for (const modelName of CANDIDATE_MODELS) {
+      try {
+        const result = await ai.models.generateContent({
+          model: modelName,
+          contents: [{ role: 'user', parts: [{ text: prompt }] }],
+          config: { responseMimeType: 'application/json' },
+        });
+        if (result?.text) { responseText = result.text; break; }
+      } catch (e) {
+        // try next
+      }
+    }
+
+    if (!responseText) {
+      return { success: false, variations: {} };
+    }
+
+    const parsed = JSON.parse(responseText);
+    const variationsMap: Record<string, VariedQuestionItem> = {};
+
+    (parsed.variations || []).forEach((v: any) => {
+      if (v.id && v.text) {
+        variationsMap[v.id] = {
+          original_id: v.id,
+          text: v.text,
+          choices: v.choices || [],
+          model_answer: v.model_answer || null,
+        };
+      }
+    });
+
+    return { success: true, variations: variationsMap };
+  } catch (err: any) {
+    console.error('varyModelNumericalQuestionsAction error:', err);
+    return { success: false, variations: {} };
+  }
 }

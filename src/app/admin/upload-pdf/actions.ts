@@ -374,10 +374,74 @@ ${pageContextNote}
     if (!responseText) throw new Error(lastError?.message || 'فشل تحليل هيكل وفهرس الكتاب');
 
     const parsed = JSON.parse(responseText);
-    const sections = parsed.sections || [];
-    if (!sections.length) throw new Error('لم يتم اكتشاف أي فصول أو دروس في الصورة أو الصفحات المُرسَلة');
+    const rawSections = parsed.sections || [];
+    if (!rawSections.length) throw new Error('لم يتم اكتشاف أي فصول أو دروس في الصورة أو الصفحات المُرسَلة');
 
-    return { success: true, sections };
+    // 🎯 Intelligent Deterministic Post-Processing of sections:
+    // Guarantees that every single lesson has non-overlapping, sequential page ranges covering 1..totalPages
+    let processedSections = rawSections.map((s: any) => ({
+      chapter: (s.chapter || 'الوحدة الأولى').trim(),
+      lesson: (s.lesson || 'الدرس الأول').trim(),
+      label: s.label || `${(s.chapter || 'الوحدة الأولى').trim()} › ${(s.lesson || 'الدرس الأول').trim()}`,
+      startPage: parseInt(s.startPage) || 0,
+      endPage: parseInt(s.endPage) || 0,
+    }));
+
+    // Check if valid startPages were extracted from TOC
+    const validStarts = processedSections.filter((s: any) => s.startPage > 0);
+    const hasRealisticStarts = validStarts.length >= Math.ceil(processedSections.length * 0.4);
+
+    if (hasRealisticStarts) {
+      // Sort sections by startPage if available
+      processedSections.sort((a: any, b: any) => (a.startPage || 1) - (b.startPage || 1));
+
+      // First lesson covers from page 1 (including intro/preface pages)
+      if (processedSections[0].startPage > 1) {
+        processedSections[0].startPage = 1;
+      }
+
+      for (let i = 0; i < processedSections.length; i++) {
+        const cur = processedSections[i];
+        const next = processedSections[i + 1];
+
+        if (next && next.startPage > cur.startPage) {
+          cur.endPage = next.startPage - 1;
+        } else if (!cur.endPage || cur.endPage <= cur.startPage) {
+          if (totalPages > 0) {
+            cur.endPage = totalPages;
+          } else {
+            cur.endPage = cur.startPage + 10;
+          }
+        }
+      }
+
+      // Ensure last section ends at totalPages if known
+      if (totalPages > 0 && processedSections.length > 0) {
+        processedSections[processedSections.length - 1].endPage = Math.max(
+          processedSections[processedSections.length - 1].startPage,
+          totalPages
+        );
+      }
+    } else if (totalPages > 0) {
+      // No page numbers found in index photo -> Distribute totalPages sequentially across lessons
+      const count = processedSections.length;
+      const pagesPerLesson = Math.max(1, Math.floor(totalPages / count));
+
+      for (let i = 0; i < count; i++) {
+        const start = i * pagesPerLesson + 1;
+        const end = i === count - 1 ? totalPages : (i + 1) * pagesPerLesson;
+        processedSections[i].startPage = start;
+        processedSections[i].endPage = end;
+      }
+    } else {
+      // Fallback sequential blocks of 15 pages
+      for (let i = 0; i < processedSections.length; i++) {
+        processedSections[i].startPage = i * 15 + 1;
+        processedSections[i].endPage = (i + 1) * 15;
+      }
+    }
+
+    return { success: true, sections: processedSections };
   } catch (err: any) {
     console.error('analyzeBookStructureAction error:', err);
     return { success: false, error: err.message || 'تعذر تحليل هيكل وفهرس الكتاب' };
@@ -443,10 +507,15 @@ export async function extractQuestionsFromChunkAction(
         }
       }
 
+      // 🎯 Strict Assignment: If targetLesson and targetChapter are specified from the confirmed book index,
+      // strictly bind all questions in this chunk to this lesson and chapter!
+      const finalLesson = targetLesson || l || 'الدرس الأول';
+      const finalChapter = targetChapter || ch || 'الوحدة الأولى';
+
       return {
         ...q,
-        lesson: l || targetLesson || 'الدرس الأول',
-        chapter: ch || targetChapter || 'الوحدة الأولى',
+        lesson: finalLesson,
+        chapter: finalChapter,
       };
     });
 

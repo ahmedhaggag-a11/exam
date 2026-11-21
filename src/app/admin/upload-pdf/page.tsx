@@ -85,6 +85,8 @@ export default function AdminUploadPDFPage() {
   const [showAddLessonModal, setShowAddLessonModal] = useState(false);
   const [newLessonChapter, setNewLessonChapter] = useState('');
   const [newLessonName, setNewLessonName] = useState('');
+  const [newLessonStartPage, setNewLessonStartPage] = useState('');
+  const [newLessonEndPage, setNewLessonEndPage] = useState('');
 
   // Reusable PDF.js document ref (keeps parsed PDF open in memory across all chunks)
   const loadedPdfDocRef = useRef<any>(null);
@@ -102,7 +104,7 @@ export default function AdminUploadPDFPage() {
     const mappedChunks: ChunkInfo[] = [];
 
     const hasRealisticPages = sections.some(
-      (s: any) => (s.endPage || 0) > 1 && (s.endPage || 0) > (s.startPage || 1)
+      (s: any) => (s.endPage || 0) >= 1 && (s.endPage || 0) >= (s.startPage || 1)
     );
 
     if (hasRealisticPages) {
@@ -307,14 +309,16 @@ export default function AdminUploadPDFPage() {
     if (!newLessonName.trim()) return;
     const ch = newLessonChapter.trim() || 'الوحدة الأولى';
     const les = newLessonName.trim();
+    const start = parseInt(newLessonStartPage) || 1;
+    const end = parseInt(newLessonEndPage) || (totalPages > 0 ? totalPages : start + 15);
     const updated = [
       ...bookSections,
       {
         chapter: ch,
         lesson: les,
         label: `${ch} › ${les}`,
-        startPage: 1,
-        endPage: 1,
+        startPage: start,
+        endPage: end,
       }
     ];
     setBookSections(updated);
@@ -322,7 +326,17 @@ export default function AdminUploadPDFPage() {
       rebuildChunksWithSections(updated, totalPages, chunkSize);
     }
     setNewLessonName('');
+    setNewLessonStartPage('');
+    setNewLessonEndPage('');
     setShowAddLessonModal(false);
+  };
+
+  const handleUpdateSectionPages = (idx: number, start: number, end: number) => {
+    const updated = bookSections.map((s, i) => i === idx ? { ...s, startPage: Math.max(1, start), endPage: Math.max(start, end) } : s);
+    setBookSections(updated);
+    if (totalPages > 0) {
+      rebuildChunksWithSections(updated, totalPages, chunkSize);
+    }
   };
 
   const handleRemoveSection = (idx: number) => {
@@ -874,6 +888,30 @@ export default function AdminUploadPDFPage() {
                     className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs"
                   />
                 </div>
+                <div className="flex items-center gap-2 sm:col-span-2 pt-1 border-t border-slate-100">
+                  <div className="flex-1">
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">من صفحة</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={newLessonStartPage}
+                      onChange={(e) => setNewLessonStartPage(e.target.value)}
+                      placeholder="1"
+                      className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold"
+                    />
+                  </div>
+                  <div className="flex-1">
+                    <label className="block text-[11px] font-semibold text-slate-600 mb-1">إلى صفحة</label>
+                    <input
+                      type="number"
+                      min={1}
+                      value={newLessonEndPage}
+                      onChange={(e) => setNewLessonEndPage(e.target.value)}
+                      placeholder={totalPages > 0 ? String(totalPages) : "20"}
+                      className="w-full px-3 py-1.5 bg-slate-50 border border-slate-200 rounded-lg text-xs font-bold"
+                    />
+                  </div>
+                </div>
               </div>
               <div className="flex justify-end gap-2">
                 <button
@@ -916,9 +954,9 @@ export default function AdminUploadPDFPage() {
                     <span className="font-semibold text-indigo-950">{sec.chapter}</span>
                     <span className="text-slate-400">›</span>
                     <span>{sec.lesson}</span>
-                    {sec.startPage && sec.endPage && sec.endPage > 1 && (
-                      <span className="text-[10px] text-slate-400 font-mono">(ص {sec.startPage}-{sec.endPage})</span>
-                    )}
+                    <span className="text-[11px] font-bold text-indigo-700 bg-indigo-50 border border-indigo-200 px-2 py-0.5 rounded font-mono">
+                      ص {sec.startPage || 1} - {sec.endPage || totalPages || 1}
+                    </span>
                     <button
                       type="button"
                       onClick={() => handleRemoveSection(i)}

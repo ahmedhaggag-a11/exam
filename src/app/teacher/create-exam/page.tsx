@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
-import { generateExamAction } from './actions';
+import { generateExamAction, varyModelNumericalQuestionsAction } from './actions';
 import { generateExamModels } from '@/lib/utils/exam-shuffler';
 import {
   RefreshCw,
@@ -107,7 +107,7 @@ export default function CreateExamPage() {
   const [modelsCount, setModelsCount] = useState(2);
   const [shuffleQuestionOrder, setShuffleQuestionOrder] = useState(true);
   const [shuffleChoices, setShuffleChoices] = useState(true);
-  const [shuffleNumbers, setShuffleNumbers] = useState(true);
+  const [varyQuestionNumbers, setVaryQuestionNumbers] = useState(true);
   const [template] = useState('classic');
 
   // ── Per-model question order strategy
@@ -223,7 +223,42 @@ export default function CreateExamPage() {
     }
   }
 
-  function handleGenerateManual() {
+  async function applyModelVariations(modelsList: any[]): Promise<any[]> {
+    if (!varyQuestionNumbers || modelsList.length <= 1) return modelsList;
+    const updated = [...modelsList];
+    for (let m = 1; m < updated.length; m++) {
+      const model = updated[m];
+      try {
+        const varRes = await varyModelNumericalQuestionsAction(
+          model.questions,
+          model.model_code,
+          model.model_name
+        );
+        if (varRes.success && Object.keys(varRes.variations).length > 0) {
+          model.questions = model.questions.map((q: any) => {
+            const v = varRes.variations[q.id];
+            if (v) {
+              return {
+                ...q,
+                original_id: q.id,
+                id: `${q.id}_var_${model.model_code}`,
+                text: v.text,
+                choices: v.choices && v.choices.length > 0 ? v.choices : q.choices,
+                model_answer: v.model_answer || q.model_answer,
+                is_varied: true,
+              };
+            }
+            return q;
+          });
+        }
+      } catch (err) {
+        console.warn('Numerical variation failed for model ' + model.model_code, err);
+      }
+    }
+    return updated;
+  }
+
+  async function handleGenerateManual() {
     if (selectedManualIds.length === 0) return;
     const selectedQs = selectedManualIds
       .map(id => pool.find(q => q.id === id) || questions.find(q => q.id === id))
@@ -236,7 +271,7 @@ export default function CreateExamPage() {
       modelsCount,
       shuffleQuestionOrder,
       shuffleChoices,
-      shuffleNumbers
+      false
     );
 
     // Apply per-model order strategy
@@ -244,6 +279,9 @@ export default function CreateExamPage() {
       ...m,
       questions: applyOrderStrategy(m.questions, perModelOrder[i] ?? 'shuffle', m.model_code),
     }));
+
+    // Apply numerical variation across models (B, C, D) if enabled
+    models = await applyModelVariations(models);
 
     if (gradingMode === 'equal' && selectedQs.length > 0) {
       const baseMark = Math.max(1, Math.round((totalMark / selectedQs.length) * 10) / 10);
@@ -341,7 +379,7 @@ export default function CreateExamPage() {
         modelsCount,
         shuffleQuestionOrder,
         shuffleChoices,
-        shuffleNumbers
+        false
       );
 
       // Apply per-model order strategy
@@ -349,6 +387,9 @@ export default function CreateExamPage() {
         ...m,
         questions: applyOrderStrategy(m.questions, perModelOrder[i] ?? 'shuffle', m.model_code),
       }));
+
+      // Apply numerical variation across models (B, C, D) if enabled
+      models = await applyModelVariations(models);
 
       // Apply initial equal marks distribution if equal mode
       if (gradingMode === 'equal' && selectedQs.length > 0) {
@@ -500,11 +541,46 @@ export default function CreateExamPage() {
         status: 'draft',
       }).select().single();
       if (examError) throw new Error(`خطأ في حفظ الامتحان: ${examError.message}`);
-      const baseModel = generatedModels[0];
-      if (baseModel?.questions?.length) {
-        const qRows = baseModel.questions.map((q: any, idx: number) => ({ exam_id: exam.id, question_id: q.id, order_index: idx }));
-        await supabase.from('exam_questions').insert(qRows);
+
+      // 1. If any questions were varied for models B, C, D, insert them into questions and question_choices to get their real IDs!
+      for (let i = 0; i < generatedModels.length; i++) {
+        const model = generatedModels[i];
+        for (let qIdx = 0; qIdx < model.questions.length; qIdx++) {
+          const q = model.questions[qIdx];
+          if (q.is_varied) {
+            const { data: newQ } = await supabase.from('questions').insert({
+              teacher_id: user.id,
+              text: q.text,
+              question_type: q.question_type || 'mcq',
+              difficulty: q.difficulty || 'medium',
+              subject: q.subject || subjectId,
+              chapter: q.chapter,
+              lesson: q.lesson,
+              model_answer: q.model_answer,
+              marks: q.marks || 1,
+            }).select().single();
+
+            if (newQ) {
+              if (q.choices && q.choices.length > 0) {
+                await supabase.from('question_choices').insert(q.choices.map((c: any) => ({
+                  question_id: newQ.id,
+                  choice_code: c.choice_code,
+                  text: c.text,
+                  is_correct: c.is_correct,
+                  order_index: c.order_index ?? 0,
+                })));
+              }
+              model.questions[qIdx] = { ...q, id: newQ.id };
+            }
+          }
+        }
       }
+
+      // Collect ALL unique question IDs across ALL models (Base model + varied models)
+      const allUniqueQuestionIds = Array.from(new Set(generatedModels.flatMap(m => m.questions.map((q: any) => q.id))));
+      const qRows = allUniqueQuestionIds.map((qid, idx) => ({ exam_id: exam.id, question_id: qid, order_index: idx }));
+      await supabase.from('exam_questions').insert(qRows);
+
       for (let i = 0; i < generatedModels.length; i++) {
         const model = generatedModels[i];
         await supabase.from('exam_models').insert({
@@ -1074,9 +1150,21 @@ export default function CreateExamPage() {
               <span className="text-xs font-bold text-slate-700">اختلاف ترتيب الإجابات (أ / ب / ج / د) لكل سؤال بين النماذج</span>
             </label>
 
-            <label className="flex items-center gap-3 cursor-pointer">
-              <input type="checkbox" checked={shuffleNumbers} onChange={e => setShuffleNumbers(e.target.checked)} className="w-4 h-4 accent-blue-600 rounded" />
-              <span className="text-xs font-bold text-slate-700">اختلاف أرقام الأسئلة (ترقيم مختلف في كل نموذج)</span>
+            <label className="flex items-start gap-3 cursor-pointer p-2.5 bg-white rounded-xl border border-blue-200 hover:border-blue-400 transition shadow-2xs">
+              <input
+                type="checkbox"
+                checked={varyQuestionNumbers}
+                onChange={e => setVaryQuestionNumbers(e.target.checked)}
+                className="w-4 h-4 accent-blue-600 rounded mt-0.5 shrink-0"
+              />
+              <div className="space-y-0.5">
+                <span className="text-xs font-black text-slate-800 block">
+                  🔢 تغيير أرقام ومعطيات المسائل الحسابية في النماذج (أرقام وحسابات مختلفة في كل نموذج)
+                </span>
+                <span className="text-[11px] text-slate-500 block leading-relaxed">
+                  إذا كان السؤال يحتوي على أرقام وحسابات، يتم تغيير الأرقام في كل نموذج بحسابات ونواتج صحيحة ومختلفة لمنع نقل الإجابات.
+                </span>
+              </div>
             </label>
           </div>
 
@@ -1355,6 +1443,11 @@ export default function CreateExamPage() {
                           {q.difficulty === 'easy' ? '🟢 سهل' : q.difficulty === 'hard' ? '🔴 صعب' : '🟡 متوسط'}
                         </span>
                         {q.chapter && <span className="text-[10px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 font-semibold">{q.chapter}</span>}
+                        {q.is_varied && (
+                          <span className="text-[10px] px-2 py-0.5 rounded-md bg-purple-100 text-purple-800 border border-purple-200 font-bold flex items-center gap-1">
+                            🔢 أرقام مخصصة لـ {generatedModels[activeModel]?.model_name || 'هذا النموذج'}
+                          </span>
+                        )}
 
                         {/* Interactive Marks Allocator for this question */}
                         <div className="mr-auto flex items-center gap-1.5 bg-slate-100 px-2 py-1 rounded-xl border border-slate-200">
