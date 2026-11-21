@@ -206,18 +206,19 @@ export default function ExamPrintPage() {
   // Handle Questions Per Page Change with Auto Font Scaling
   function handleQuestionsPerPageChange(val: number) {
     setQuestionsPerPage(val);
-    if (val >= 5) {
+    const count = val > 0 ? val : totalQuestionsCount;
+    if (count >= 5) {
       setImagePosition('inline');
     }
-    if (autoScaleFont && val > 0) {
+    if (autoScaleFont) {
       if (quickColumns === 2) {
-        if (val <= 4) setFontSize('base');
-        else if (val <= 6) setFontSize('sm');
+        if (count <= 4) setFontSize('base');
+        else if (count <= 6) setFontSize('sm');
         else setFontSize('xs');
       } else {
-        if (val <= 2) setFontSize('lg');
-        else if (val <= 3) setFontSize('base');
-        else if (val <= 5) setFontSize('sm');
+        if (count <= 2) setFontSize('lg');
+        else if (count <= 3) setFontSize('base');
+        else if (count <= 5) setFontSize('sm');
         else setFontSize('xs');
       }
     }
@@ -226,13 +227,14 @@ export default function ExamPrintPage() {
   // Handle Columns Change with Auto Font Scaling
   function handleColumnsChange(cols: 1 | 2) {
     setQuickColumns(cols);
-    if (autoScaleFont && questionsPerPage > 0) {
+    const count = questionsPerPage > 0 ? questionsPerPage : totalQuestionsCount;
+    if (autoScaleFont) {
       if (cols === 2) {
-        if (questionsPerPage <= 4) setFontSize('base');
+        if (count <= 4) setFontSize('base');
         else setFontSize('sm');
       } else {
-        if (questionsPerPage <= 2) setFontSize('lg');
-        else if (questionsPerPage <= 4) setFontSize('base');
+        if (count <= 2) setFontSize('lg');
+        else if (count <= 4) setFontSize('base');
         else setFontSize('sm');
       }
     }
@@ -309,7 +311,9 @@ export default function ExamPrintPage() {
   const estimatedPagesCount =
     questionsPerPage > 0
       ? Math.ceil(totalQuestionsCount / questionsPerPage)
-      : 'تلقائي (حسب الارتفاع)';
+      : totalQuestionsCount <= 8
+      ? 1
+      : Math.ceil(totalQuestionsCount / (quickColumns === 2 ? 8 : 5));
 
   // Effective Config passed to renderer
   const effectiveConfig: ExamPaperConfig = {
@@ -383,6 +387,24 @@ export default function ExamPrintPage() {
                 </>
               )}
             </button>
+
+            {/* Quick 1-Page Fit Button */}
+            {totalQuestionsCount <= 10 && (
+              <button
+                type="button"
+                onClick={() => {
+                  handleQuestionsPerPageChange(totalQuestionsCount);
+                  setAutoScaleFont(true);
+                  setFontSize('xs');
+                  setImagePosition('inline');
+                }}
+                className="flex items-center gap-1.5 px-3.5 py-1.5 bg-amber-50 hover:bg-amber-100 text-amber-900 border border-amber-300 rounded-xl text-xs font-black transition shadow-2xs"
+                title="ضبط وتصغير تلقائي لتثبيت الامتحان داخل صفحة A4 واحدة تماماً ومنع خروج التذييل"
+              >
+                <Sparkles className="w-3.5 h-3.5 text-amber-600" />
+                <span>🎯 ضبط لصفحة واحدة (A4)</span>
+              </button>
+            )}
 
             {/* Save as PDF Button */}
             <button

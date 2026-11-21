@@ -81,22 +81,29 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
   };
 
   const qp = config.questionsPerPage || 0;
-  const isHighDensity = qp >= 5;
+  const totalQs = questions.length;
+  // Calculate effective count for density & scaling (when qp === 0, all questions fit or auto-split)
+  const effectiveQp = qp > 0 ? qp : totalQs;
+  const isHighDensity = effectiveQp >= 5;
+  const isUltraDensity = effectiveQp >= 7;
 
   // Dynamic Auto Font Size calculation
   const effectiveFontSize = useMemo(() => {
-    if (config.autoScaleFont && qp > 0) {
+    if (config.autoScaleFont) {
+      const count = qp > 0 ? qp : questions.length;
       if (config.columns === 2) {
-        if (qp <= 4) return '0.95rem';
-        if (qp <= 6) return '0.85rem';
-        if (qp <= 8) return '0.75rem';
-        return '0.7rem';
+        if (count <= 4) return '0.95rem';
+        if (count <= 6) return '0.85rem';
+        if (count <= 8) return '0.78rem';
+        if (count <= 10) return '0.72rem';
+        return '0.675rem';
       } else {
-        if (qp <= 2) return '1.1rem';
-        if (qp <= 3) return '1rem';
-        if (qp <= 4) return '0.925rem';
-        if (qp <= 6) return '0.8rem';
-        if (qp <= 8) return '0.725rem';
+        if (count <= 2) return '1.1rem';
+        if (count <= 3) return '1rem';
+        if (count <= 4) return '0.925rem';
+        if (count <= 5) return '0.825rem';
+        if (count <= 6) return '0.775rem';
+        if (count <= 8) return '0.72rem';
         return '0.675rem';
       }
     }
@@ -106,30 +113,32 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
     if (config.fontSize === 'lg') return '1.1rem';
     if (config.fontSize === 'xl') return '1.25rem';
     return '0.95rem';
-  }, [config.fontSize, config.autoScaleFont, qp, config.columns]);
+  }, [config.fontSize, config.autoScaleFont, qp, questions.length, config.columns]);
 
   // Question Spacing Class
   const getQuestionSpacingClass = () => {
-    if (config.autoScaleFont && qp > 0) {
-      if (qp <= 2) return 'space-y-5 mb-4';
-      if (qp <= 4) return 'space-y-3 mb-2.5';
-      if (qp <= 6) return 'space-y-2 mb-2';
+    const count = qp > 0 ? qp : questions.length;
+    if (config.autoScaleFont) {
+      if (count <= 2) return 'space-y-4 mb-3';
+      if (count <= 4) return 'space-y-2.5 mb-2';
+      if (count <= 6) return 'space-y-1.5 mb-1.5';
       return 'space-y-1 mb-1';
     }
     const spacingClasses: Record<string, string> = {
-      compact: 'space-y-1.5 mb-1.5',
-      normal: 'space-y-3 mb-3',
-      spacious: 'space-y-5 mb-5',
+      compact: 'space-y-1 mb-1',
+      normal: 'space-y-2 mb-2',
+      spacious: 'space-y-4 mb-4',
     };
-    return spacingClasses[config.questions.spacing] || 'space-y-2.5 mb-2.5';
+    return spacingClasses[config.questions.spacing] || 'space-y-1.5 mb-1.5';
   };
 
   // Image max height scaling
   const getImageMaxHeightClass = () => {
-    if (qp >= 7) return 'max-h-20 sm:max-h-24';
-    if (qp >= 5) return 'max-h-24 sm:max-h-28';
-    if (qp >= 3) return 'max-h-32 sm:max-h-36';
-    return 'max-h-44 sm:max-h-48';
+    const count = qp > 0 ? qp : questions.length;
+    if (count >= 8) return 'max-h-16 sm:max-h-20';
+    if (count >= 6) return 'max-h-20 sm:max-h-24';
+    if (count >= 4) return 'max-h-28 sm:max-h-32';
+    return 'max-h-40 sm:max-h-44';
   };
 
   const getChoicesGrid = () => {
@@ -487,208 +496,123 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
   );
 
   // ─────────────────────────────────────────────────────────────
-  // MODE A: PAGINATED EXACT A4 SHEETS (when questionsPerPage > 0)
+  // UNIFIED SMART PAGINATION (Fixed or Auto Questions Per Page)
   // ─────────────────────────────────────────────────────────────
+  let effectiveChunkSize: number;
   if (qp > 0) {
-    const pageChunks: Array<typeof questions> = [];
-    for (let i = 0; i < questions.length; i += qp) {
-      pageChunks.push(questions.slice(i, i + qp));
+    effectiveChunkSize = qp;
+  } else {
+    // Automatic Smart Pagination (qp === 0):
+    // If total questions <= 8, fit all questions onto 1 single A4 sheet!
+    if (questions.length <= 8) {
+      effectiveChunkSize = questions.length;
+    } else {
+      // For larger exams (> 8 questions), neatly split into balanced pages
+      effectiveChunkSize = config.columns === 2 ? 8 : 5;
     }
-    if (pageChunks.length === 0) pageChunks.push([]);
-    const totalPages = pageChunks.length;
-
-    return (
-      <div className="exam-pages-container space-y-8 print:space-y-0">
-        <style dangerouslySetInnerHTML={{ __html: `
-          @media print {
-            @page {
-              size: A4 portrait;
-              margin: 5mm 6mm 5mm 6mm !important;
-            }
-            html, body {
-              width: 210mm !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              background: white !important;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-            }
-            .no-print {
-              display: none !important;
-            }
-            .print-page-wrapper {
-              page-break-after: always !important;
-              break-after: page !important;
-            }
-            .exam-a4-page {
-              width: 100% !important;
-              max-width: 100% !important;
-              height: 284mm !important;
-              max-height: 284mm !important;
-              min-height: 284mm !important;
-              overflow: hidden !important;
-              box-sizing: border-box !important;
-              margin: 0 !important;
-              padding: 4mm 6mm !important;
-              page-break-after: always !important;
-              break-after: page !important;
-              box-shadow: none !important;
-              border-radius: 0 !important;
-            }
-            .exam-a4-page:last-child {
-              page-break-after: avoid !important;
-              break-after: avoid !important;
-            }
-          }
-        `}} />
-
-        {pageChunks.map((chunk, pIdx) => {
-          const pageNum = pIdx + 1;
-          const isLast = pIdx === totalPages - 1;
-
-          return (
-            <div
-              key={`page-${pIdx}`}
-              dir="rtl"
-              className={`exam-a4-page relative bg-white text-slate-900 mx-auto transition-all print:border-slate-900 print:shadow-none flex flex-col justify-between ${
-                fontClasses[config.fontFamily] || 'font-sans'
-              } ${borderClasses[config.pageBorder] || 'border'} ${
-                isPreview
-                  ? 'p-5 max-w-4xl shadow-lg rounded-xl text-sm min-h-[720px]'
-                  : 'p-6 sm:p-7 max-w-[210mm] w-full shadow-xl rounded-md min-h-[297mm] max-h-[297mm] overflow-hidden'
-              }`}
-              style={{
-                fontSize: effectiveFontSize,
-                pageBreakAfter: pIdx < totalPages - 1 ? 'always' : 'auto',
-                breakAfter: pIdx < totalPages - 1 ? 'page' : 'auto',
-              }}
-            >
-              {renderWatermark()}
-
-              {/* Page Content: Header + Questions */}
-              <div className="flex-1 flex flex-col min-h-0">
-                {pIdx === 0 ? renderFullHeader() : renderCompactHeader(pageNum, totalPages)}
-
-                {/* Questions Grid / Main */}
-                <main
-                  className={`relative z-10 flex-1 ${
-                    config.columns === 2 ? 'columns-1 md:columns-2 gap-6 [column-rule:1px_solid_#e2e8f0]' : ''
-                  }`}
-                >
-                  <div className={getQuestionSpacingClass()}>
-                    {chunk.map((q, qLocalIdx) => {
-                      const globalIndex = pIdx * qp + qLocalIdx;
-                      return renderQuestionItem(q, globalIndex);
-                    })}
-                  </div>
-                </main>
-              </div>
-
-              {/* Footer pushed to bottom */}
-              {renderFooter(pageNum, totalPages, isLast)}
-            </div>
-          );
-        })}
-      </div>
-    );
   }
 
-  // ─────────────────────────────────────────────────────────────
-  // MODE B: CONTINUOUS AUTO-FLOW (when questionsPerPage === 0)
-  // ─────────────────────────────────────────────────────────────
-  const mcqs = questions.filter(
-    (q) => q.question_type === 'mcq' || q.question_type === 'multiple_choice' || (q.choices && q.choices.length > 0)
-  );
-  const tfs = questions.filter((q) => q.question_type === 'true_false' || q.question_type === 'صح أو خطأ');
-  const essays = questions.filter((q) => !mcqs.includes(q) && !tfs.includes(q));
+  const pageChunks: Array<typeof questions> = [];
+  for (let i = 0; i < questions.length; i += effectiveChunkSize) {
+    pageChunks.push(questions.slice(i, i + effectiveChunkSize));
+  }
+  if (pageChunks.length === 0) pageChunks.push([]);
+  const totalPages = pageChunks.length;
 
   return (
-    <div
-      dir="rtl"
-      className={`exam-a4-page relative bg-white text-slate-900 mx-auto transition-all print:border-slate-900 print:shadow-none flex flex-col justify-between ${
-        fontClasses[config.fontFamily] || 'font-sans'
-      } ${borderClasses[config.pageBorder] || 'border'} ${
-        isPreview
-          ? 'p-6 max-w-4xl shadow-lg rounded-xl text-sm'
-          : 'p-7 sm:p-9 max-w-[210mm] w-full shadow-md min-h-[297mm] print:min-h-0 print:p-5 print:max-w-none print:shadow-none'
-      }`}
-      style={{
-        fontSize: effectiveFontSize,
-      }}
-    >
+    <div className="exam-pages-container space-y-8 print:space-y-0">
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
           @page {
             size: A4 portrait;
-            margin: 6mm 8mm !important;
+            margin: 4mm 5mm 4mm 5mm !important;
           }
           html, body {
             width: 210mm !important;
             margin: 0 !important;
             padding: 0 !important;
             background: white !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          .no-print {
+            display: none !important;
+          }
+          .print-page-wrapper {
+            page-break-after: always !important;
+            break-after: page !important;
+          }
+          .exam-a4-page {
+            width: 100% !important;
+            max-width: 100% !important;
+            height: 288mm !important;
+            max-height: 288mm !important;
+            min-height: 288mm !important;
+            overflow: hidden !important;
+            box-sizing: border-box !important;
+            margin: 0 !important;
+            padding: 3.5mm 5mm !important;
+            page-break-inside: avoid !important;
+            break-inside: avoid !important;
+            page-break-after: always !important;
+            break-after: page !important;
+            box-shadow: none !important;
+            border-radius: 0 !important;
+          }
+          .exam-a4-page:last-child {
+            page-break-after: avoid !important;
+            break-after: avoid !important;
           }
         }
       `}} />
 
-      {renderWatermark()}
+      {pageChunks.map((chunk, pIdx) => {
+        const pageNum = pIdx + 1;
+        const isLast = pIdx === totalPages - 1;
 
-      <div>
-        {renderFullHeader()}
+        return (
+          <div
+            key={`page-${pIdx}`}
+            dir="rtl"
+            className={`exam-a4-page relative bg-white text-slate-900 mx-auto transition-all print:border-slate-900 print:shadow-none flex flex-col justify-between ${
+              fontClasses[config.fontFamily] || 'font-sans'
+            } ${borderClasses[config.pageBorder] || 'border'} ${
+              isPreview
+                ? 'p-5 max-w-4xl shadow-lg rounded-xl text-sm min-h-[720px]'
+                : 'p-5 sm:p-6 max-w-[210mm] w-full shadow-xl rounded-md min-h-[297mm] max-h-[297mm] overflow-hidden'
+            }`}
+            style={{
+              fontSize: effectiveFontSize,
+              pageBreakAfter: pIdx < totalPages - 1 ? 'always' : 'auto',
+              breakAfter: pIdx < totalPages - 1 ? 'page' : 'auto',
+            }}
+          >
+            {renderWatermark()}
 
-        <main
-          className={`relative z-10 ${
-            config.columns === 2 ? 'columns-1 md:columns-2 gap-8 [column-rule:1px_solid_#e2e8f0]' : ''
-          }`}
-        >
-          {mcqs.length > 0 && (
-            <section className="mb-4">
-              <h2 className="font-black text-xs text-slate-900 border-b-2 border-slate-800 pb-1 mb-2.5 flex items-center justify-between break-after-avoid">
-                <span>السؤال الأول: اختر الإجابة الصحيحة من بين البدائل المعطاة</span>
-                <span className="text-[11px] font-normal text-slate-500">
-                  ({mcqs.length} أسئلة)
-                </span>
-              </h2>
+            {/* Page Content: Header + Questions */}
+            <div className="flex-1 flex flex-col min-h-0">
+              {pIdx === 0 ? renderFullHeader() : renderCompactHeader(pageNum, totalPages)}
 
-              <div className={getQuestionSpacingClass()}>
-                {mcqs.map((q, idx) => renderQuestionItem(q, idx))}
-              </div>
-            </section>
-          )}
+              {/* Questions Grid / Main */}
+              <main
+                className={`relative z-10 flex-1 ${
+                  config.columns === 2 ? 'columns-1 md:columns-2 gap-6 [column-rule:1px_solid_#e2e8f0]' : ''
+                }`}
+              >
+                <div className={getQuestionSpacingClass()}>
+                  {chunk.map((q, qLocalIdx) => {
+                    const globalIndex = pIdx * effectiveChunkSize + qLocalIdx;
+                    return renderQuestionItem(q, globalIndex);
+                  })}
+                </div>
+              </main>
+            </div>
 
-          {tfs.length > 0 && (
-            <section className="mb-4">
-              <h2 className="font-black text-xs text-slate-900 border-b-2 border-slate-800 pb-1 mb-2.5 flex items-center justify-between break-after-avoid">
-                <span>السؤال الثاني: ضع علامة (✓) أو (✗)</span>
-                <span className="text-[11px] font-normal text-slate-500">
-                  ({tfs.length} أسئلة)
-                </span>
-              </h2>
-
-              <div className={getQuestionSpacingClass()}>
-                {tfs.map((q, idx) => renderQuestionItem(q, mcqs.length + idx))}
-              </div>
-            </section>
-          )}
-
-          {essays.length > 0 && (
-            <section className="mb-4">
-              <h2 className="font-black text-xs text-slate-900 border-b-2 border-slate-800 pb-1 mb-2.5 flex items-center justify-between break-after-avoid">
-                <span>الأسئلة المقالية:</span>
-                <span className="text-[11px] font-normal text-slate-500">
-                  ({essays.length} أسئلة)
-                </span>
-              </h2>
-
-              <div className={getQuestionSpacingClass()}>
-                {essays.map((q, idx) => renderQuestionItem(q, mcqs.length + tfs.length + idx))}
-              </div>
-            </section>
-          )}
-        </main>
-      </div>
-
-      {renderFooter(1, 1, true)}
+            {/* Footer pushed to bottom */}
+            {renderFooter(pageNum, totalPages, isLast)}
+          </div>
+        );
+      })}
     </div>
   );
 };

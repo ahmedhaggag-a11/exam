@@ -14,11 +14,14 @@ import {
   Gauge, 
   Trash2,
   Crop,
-  FolderSync
+  FolderSync,
+  CheckCircle2,
+  Sparkles
 } from 'lucide-react';
 import { Question } from '@/types/database';
 import RecropModal from '@/components/RecropModal';
 import MoveQuestionModal from '@/components/MoveQuestionModal';
+import EditAnswerModal from '@/components/EditAnswerModal';
 
 interface SourceItem {
   id: string;
@@ -48,6 +51,10 @@ export default function TeacherQuestionBankPage() {
   // Move Question to Lesson Modal state
   const [moveModalOpen, setMoveModalOpen] = useState(false);
   const [selectedMoveQuestion, setSelectedMoveQuestion] = useState<Question | null>(null);
+
+  // Edit Question Answer & Choices Modal state
+  const [editAnswerModalOpen, setEditAnswerModalOpen] = useState(false);
+  const [selectedEditQuestion, setSelectedEditQuestion] = useState<Question | null>(null);
 
   const supabase = createClient();
 
@@ -301,6 +308,12 @@ export default function TeacherQuestionBankPage() {
     );
   };
 
+  const handleAnswerUpdated = (updatedQuestion: Question) => {
+    setQuestions((prev) =>
+      prev.map((q) => (q.id === updatedQuestion.id ? { ...q, ...updatedQuestion } : q))
+    );
+  };
+
   return (
     <div className="space-y-6">
       {/* Header */}
@@ -547,6 +560,19 @@ export default function TeacherQuestionBankPage() {
                     <button
                       type="button"
                       onClick={() => {
+                        setSelectedEditQuestion(q);
+                        setEditAnswerModalOpen(true);
+                      }}
+                      className="px-2.5 py-1 text-xs font-bold bg-emerald-50 hover:bg-emerald-100 text-emerald-800 rounded-lg border border-emerald-200 flex items-center gap-1.5 transition shrink-0 shadow-2xs"
+                      title="تعديل إجابة السؤال والخيارات"
+                    >
+                      <CheckCircle2 className="w-3.5 h-3.5 text-emerald-600" />
+                      <span>✏️ تعديل الإجابة والخيارات</span>
+                    </button>
+
+                    <button
+                      type="button"
+                      onClick={() => {
                         setSelectedMoveQuestion(q);
                         setMoveModalOpen(true);
                       }}
@@ -612,30 +638,101 @@ export default function TeacherQuestionBankPage() {
                   </div>
                 )}
 
-                {/* Choices rendering */}
-                {q.choices && q.choices.length > 0 && (
-                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
-                    {q.choices
-                      .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
-                      .map((c, cIdx) => (
-                        <div
-                          key={c.id || cIdx}
-                          className={`p-3 rounded-xl border text-sm flex items-center justify-between ${
-                            c.is_correct
-                              ? 'bg-emerald-50 text-emerald-900 border-emerald-300 font-bold'
-                              : 'bg-white text-slate-700 border-slate-200'
-                          }`}
-                        >
-                          <span>
-                            ({c.choice_code || ['أ', 'ب', 'ج', 'د'][cIdx]}) {c.text}
+                {/* Choices rendering for MCQ */}
+                {q.question_type === 'mcq' && (
+                  <div>
+                    {q.choices && q.choices.length > 0 ? (
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 pt-1">
+                        {q.choices
+                          .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+                          .map((c, cIdx) => (
+                            <div
+                              key={c.id || cIdx}
+                              className={`p-3 rounded-xl border text-sm flex items-center justify-between ${
+                                c.is_correct
+                                  ? 'bg-emerald-50 text-emerald-900 border-emerald-300 font-bold'
+                                  : 'bg-white text-slate-700 border-slate-200'
+                              }`}
+                            >
+                              <span>
+                                ({c.choice_code || ['أ', 'ب', 'ج', 'د'][cIdx]}) {c.text}
+                              </span>
+                              {c.is_correct && (
+                                <span className="text-xs bg-emerald-600 text-white px-2 py-0.5 rounded-md font-bold">
+                                  ✓ صحيح
+                                </span>
+                              )}
+                            </div>
+                          ))}
+                      </div>
+                    ) : (
+                      <div className="p-3 bg-amber-50/70 border border-amber-200 rounded-xl text-xs text-amber-800">
+                        لم يتم تسجيل خيارات لهذا السؤال بعد. انقر على &quot;تعديل الإجابة والخيارات&quot; لإضافتها.
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {/* Essay Model Answer rendering */}
+                {q.question_type === 'essay' && (
+                  <div className="mt-2 p-3.5 bg-emerald-50/60 border border-emerald-200 rounded-2xl text-sm text-emerald-950 flex items-start gap-2.5">
+                    <div className="w-7 h-7 rounded-xl bg-emerald-100 text-emerald-700 flex items-center justify-center shrink-0">
+                      <Sparkles className="w-4 h-4" />
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <span className="font-black text-emerald-900 block text-xs mb-0.5">الإجابة النموذجية:</span>
+                      <p className="leading-relaxed text-sm whitespace-pre-wrap">
+                        {q.model_answer || (
+                          <span className="text-slate-400 italic font-normal text-xs">
+                            لم يتم إدخال إجابة نموذجية لهذا السؤال بعد. انقر على &quot;تعديل الإجابة والخيارات&quot; لإضافتها.
                           </span>
-                          {c.is_correct && (
-                            <span className="text-xs bg-emerald-600 text-white px-2 py-0.5 rounded-md font-bold">
-                              ✓ صحيح
+                        )}
+                      </p>
+                    </div>
+                  </div>
+                )}
+
+                {/* True / False rendering */}
+                {q.question_type === 'true_false' && (
+                  <div className="mt-2 p-3.5 bg-slate-50 border border-slate-200 rounded-2xl flex items-center justify-between flex-wrap gap-2">
+                    <div className="flex items-center gap-2">
+                      <span className="font-bold text-xs text-slate-600">الإجابة الصحيحة المعتمدة:</span>
+                      {(() => {
+                        const correctChoice = q.choices?.find((c) => c.is_correct);
+                        const isAnsTrue = 
+                          q.model_answer?.trim() === 'صح' || 
+                          q.model_answer?.trim() === 'صحيح' || 
+                          q.model_answer?.trim() === 'صواب' || 
+                          correctChoice?.text?.trim() === 'صح' ||
+                          correctChoice?.text?.includes('صح');
+                        const isAnsFalse = 
+                          q.model_answer?.trim() === 'خطأ' || 
+                          correctChoice?.text?.trim() === 'خطأ' ||
+                          correctChoice?.text?.includes('خطأ');
+
+                        if (isAnsTrue) {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-emerald-100 text-emerald-800 border border-emerald-300 rounded-xl font-black text-xs">
+                              <span>✓</span>
+                              <span>عبارة صحيحة (صواب / صح)</span>
                             </span>
-                          )}
-                        </div>
-                      ))}
+                          );
+                        } else if (isAnsFalse) {
+                          return (
+                            <span className="inline-flex items-center gap-1.5 px-3 py-1 bg-rose-100 text-rose-800 border border-rose-300 rounded-xl font-black text-xs">
+                              <span>✗</span>
+                              <span>عبارة خاطئة (خطأ)</span>
+                            </span>
+                          );
+                        } else {
+                          return (
+                            <span className="text-slate-400 text-xs italic">
+                              لم تُحدد بعد. انقر على &quot;تعديل الإجابة والخيارات&quot; لتحديدها.
+                            </span>
+                          );
+                        }
+                      })()}
+                    </div>
                   </div>
                 )}
               </div>
@@ -670,6 +767,17 @@ export default function TeacherQuestionBankPage() {
           setSelectedMoveQuestion(null);
         }}
         onQuestionMoved={handleQuestionMoved}
+      />
+
+      {/* Interactive Edit Question Answer & Choices Modal */}
+      <EditAnswerModal
+        isOpen={editAnswerModalOpen}
+        question={selectedEditQuestion}
+        onClose={() => {
+          setEditAnswerModalOpen(false);
+          setSelectedEditQuestion(null);
+        }}
+        onAnswerUpdated={handleAnswerUpdated}
       />
     </div>
   );

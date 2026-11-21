@@ -170,3 +170,152 @@ export async function moveQuestionLessonAction(
   }
 }
 
+/**
+ * Update the answer of a question (MCQ choices/correct, Essay model answer, True/False answer).
+ */
+export async function updateQuestionAnswerAction(payload: {
+  questionId: string;
+  questionText?: string;
+  questionType: 'mcq' | 'essay' | 'true_false';
+  modelAnswer?: string | null;
+  trueFalseAnswer?: 'صح' | 'خطأ';
+  choices?: Array<{
+    id?: string;
+    choice_code: string;
+    text: string;
+    is_correct: boolean;
+    order_index: number;
+  }>;
+}): Promise<{ success: boolean; error?: string; question?: any }> {
+  try {
+    const { questionId, questionText, questionType, modelAnswer, trueFalseAnswer, choices } = payload;
+    if (!questionId) throw new Error('معرف السؤال مفقود');
+
+    // 1. Prepare questions table updates
+    const questionUpdates: Record<string, any> = {};
+    if (questionText !== undefined) {
+      questionUpdates.text = questionText.trim();
+    }
+
+    if (questionType === 'essay') {
+      questionUpdates.model_answer = modelAnswer && modelAnswer.trim() ? modelAnswer.trim() : null;
+    } else if (questionType === 'true_false') {
+      const tfVal = trueFalseAnswer === 'خطأ' ? 'خطأ' : 'صح';
+      questionUpdates.model_answer = tfVal;
+
+      // Also ensure choices for true_false are synced
+      const { data: existingChoices } = await supabaseAdmin
+        .from('question_choices')
+        .select('id, choice_code, text, is_correct, order_index')
+        .eq('question_id', questionId)
+        .order('order_index');
+
+      if (existingChoices && existingChoices.length >= 2) {
+        // Update existing choices
+        for (const ec of existingChoices) {
+          const isCorrect = tfVal === 'صح' 
+            ? (ec.text.includes('صح') || ec.text.includes('صواب') || ec.choice_code === 'أ' || ec.order_index === 0)
+            : (ec.text.includes('خطأ') || ec.choice_code === 'ب' || ec.order_index === 1);
+          await supabaseAdmin
+            .from('question_choices')
+            .update({ is_correct: isCorrect })
+            .eq('id', ec.id);
+        }
+      } else {
+        // If no choices existed, create 2 standard choices for True/False
+        if (existingChoices && existingChoices.length > 0) {
+          await supabaseAdmin.from('question_choices').delete().eq('question_id', questionId);
+        }
+        await supabaseAdmin.from('question_choices').insert([
+          {
+            question_id: questionId,
+            choice_code: 'أ',
+            text: 'صح',
+            is_correct: tfVal === 'صح',
+            order_index: 0,
+          },
+          {
+            question_id: questionId,
+            choice_code: 'ب',
+            text: 'خطأ',
+            is_correct: tfVal === 'خطأ',
+            order_index: 1,
+          },
+        ]);
+      }
+    } else if (questionType === 'mcq') {
+      if (choices && choices.length > 0) {
+        const correctChoice = choices.find((c) => c.is_correct);
+        if (correctChoice) {
+          questionUpdates.model_answer = `${correctChoice.choice_code}. ${correctChoice.text}`.trim();
+        }
+
+        // Fetch existing choices from DB
+        const { data: existingChoices } = await supabaseAdmin
+          .from('question_choices')
+          .select('id')
+          .eq('question_id', questionId);
+
+        const existingIds = (existingChoices || []).map((c) => c.id);
+        const incomingIds = choices.filter((c) => c.id).map((c) => c.id!);
+
+        // Delete removed choices
+        const idsToDelete = existingIds.filter((id) => !incomingIds.includes(id));
+        if (idsToDelete.length > 0) {
+          await supabaseAdmin.from('question_choices').delete().in('id', idsToDelete);
+        }
+
+        // Update or Insert choices
+        for (let i = 0; i < choices.length; i++) {
+          const c = choices[i];
+          const choicePayload = {
+            question_id: questionId,
+            choice_code: c.choice_code || ['أ', 'ب', 'ج', 'د', 'هـ', 'و'][i] || `${i + 1}`,
+            text: c.text.trim(),
+            is_correct: Boolean(c.is_correct),
+            order_index: i,
+          };
+
+          if (c.id && existingIds.includes(c.id)) {
+            const { error: updErr } = await supabaseAdmin
+              .from('question_choices')
+              .update(choicePayload)
+              .eq('id', c.id);
+            if (updErr) throw new Error(updErr.message);
+          } else {
+            const { error: insErr } = await supabaseAdmin
+              .from('question_choices')
+              .insert(choicePayload);
+            if (insErr) throw new Error(insErr.message);
+          }
+        }
+      }
+    }
+
+    // Update questions table
+    if (Object.keys(questionUpdates).length > 0) {
+      const { error: qUpdErr } = await supabaseAdmin
+        .from('questions')
+        .update(questionUpdates)
+        .eq('id', questionId);
+
+      if (qUpdErr) throw new Error(qUpdErr.message);
+    }
+
+    // Fetch full updated question to return
+    const { data: updatedQuestion, error: fetchErr } = await supabaseAdmin
+      .from('questions')
+      .select('*, choices:question_choices(*)')
+      .eq('id', questionId)
+      .single();
+
+    if (fetchErr) throw new Error(fetchErr.message);
+
+    return { success: true, question: updatedQuestion };
+  } catch (err: any) {
+    console.error('updateQuestionAnswerAction error:', err);
+    return { success: false, error: err.message || 'خطأ أثناء تحديث إجابة السؤال' };
+  }
+}
+
+
