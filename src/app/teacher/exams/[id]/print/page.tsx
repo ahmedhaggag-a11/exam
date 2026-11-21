@@ -610,12 +610,12 @@ export default function ExamPrintPage() {
       {/* ───────────────────────────────────────────────────────────── */}
       {/* RENDERED EXAM PAPER PAGES (Live A4 Preview)                    */}
       {/* ───────────────────────────────────────────────────────────── */}
-      <div className="pt-32 pb-20 bg-slate-200/70 min-h-screen space-y-10 no-print-bg">
+      <div className="pt-32 pb-20 bg-slate-200/70 min-h-screen space-y-10 no-print-bg print:p-0 print:m-0 print:space-y-0 print:bg-white print:min-h-0 print:w-full">
         {displayedModels.map((model) => {
           const modelQs = getModelQuestions(model as ExamModel);
 
           return (
-            <div key={model.id} className="print-page-wrapper">
+            <div key={model.id} className="print-page-wrapper print:m-0 print:p-0">
               <ExamPaperRenderer
                 config={effectiveConfig}
                 exam={{

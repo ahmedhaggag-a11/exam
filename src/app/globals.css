@@ -15,13 +15,23 @@ body {
 }
 
 @media print {
-  body {
+  html, body {
     background-color: white !important;
     color: black !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    width: 100% !important;
   }
 
   .no-print {
     display: none !important;
+  }
+
+  .no-print-bg {
+    padding: 0 !important;
+    margin: 0 !important;
+    background: white !important;
+    min-height: 0 !important;
   }
 
   .print-page-break {

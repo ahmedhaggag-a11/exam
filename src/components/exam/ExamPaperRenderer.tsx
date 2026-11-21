@@ -340,9 +340,9 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
       <article key={q.id} className="break-inside-avoid">
         {useInlineImage ? (
           /* SIDE-BY-SIDE LAYOUT: Text & Choices on Right, Diagram on Left (Massive Space Saver!) */
-          <div className="flex items-start justify-between gap-3">
+          <div className="flex items-center justify-between gap-3">
             <div className="flex-1 min-w-0">
-              <div className="flex items-start gap-1.5 mb-1">
+              <div className="flex items-start gap-1.5 mb-0.5">
                 <span className="font-black text-blue-950 shrink-0">
                   {formatQNum(globalIndex)}
                 </span>
@@ -358,7 +358,7 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
 
               {/* Choices */}
               {isMcq && q.choices && q.choices.length > 0 && (
-                <div className={`grid gap-1 pr-3 mt-1 ${getChoicesGrid()}`}>
+                <div className={`grid gap-0.5 pr-2 mt-0.5 ${getChoicesGrid()}`}>
                   {q.choices.map((c: any, cIdx: number) => (
                     <div key={c.id || cIdx} className="text-xs font-medium text-slate-800 flex items-start gap-1">
                       <span className="font-bold text-blue-900 w-4 text-center shrink-0">
@@ -380,12 +380,12 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
               )}
             </div>
 
-            {/* Diagram Image on the left */}
-            <div className="shrink-0 flex items-center justify-center p-0.5 border border-slate-200 rounded bg-white shadow-2xs">
+            {/* Diagram Image vertically centered */}
+            <div className="shrink-0 flex items-center justify-center p-0.5 border border-slate-200 rounded bg-white shadow-2xs self-center">
               <img
                 src={q.image_urls![0]}
                 alt="رسم بياني"
-                className={`${getImageMaxHeightClass()} max-w-[130px] sm:max-w-[160px] object-contain`}
+                className={`${getImageMaxHeightClass()} max-w-[110px] sm:max-w-[140px] object-contain mx-auto`}
               />
             </div>
           </div>
@@ -496,39 +496,58 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
   );
 
   // ─────────────────────────────────────────────────────────────
-  // UNIFIED SMART PAGINATION (Fixed or Auto Questions Per Page)
+  // BALANCED SMART PAGINATION (Calculates optimal page count)
   // ─────────────────────────────────────────────────────────────
   let effectiveChunkSize: number;
+
   if (qp > 0) {
+    // User explicitly chose a fixed number of questions per page
     effectiveChunkSize = qp;
   } else {
-    // Automatic Smart Pagination (qp === 0):
-    // If total questions <= 8, fit all questions onto 1 single A4 sheet!
-    if (questions.length <= 8) {
-      effectiveChunkSize = questions.length;
+    // AUTO MODE (Smart Balanced Distribution):
+    if (config.columns === 2) {
+      if (totalQs <= 14) {
+        effectiveChunkSize = totalQs;
+      } else {
+        const targetPages = Math.ceil(totalQs / 14);
+        effectiveChunkSize = Math.ceil(totalQs / targetPages);
+      }
     } else {
-      // For larger exams (> 8 questions), neatly split into balanced pages
-      effectiveChunkSize = config.columns === 2 ? 8 : 5;
+      // 1 column:
+      if (totalQs <= 8) {
+        // Up to 8 questions -> fit all on 1 page!
+        effectiveChunkSize = totalQs;
+      } else if (totalQs <= 14) {
+        // 9 to 14 questions -> balanced on 2 pages! (e.g. 11 -> 6 & 5, 12 -> 6 & 6)
+        effectiveChunkSize = Math.ceil(totalQs / 2);
+      } else if (totalQs <= 20) {
+        // 15 to 20 questions -> balanced on 3 pages!
+        effectiveChunkSize = Math.ceil(totalQs / 3);
+      } else {
+        const targetPages = Math.ceil(totalQs / 6);
+        effectiveChunkSize = Math.ceil(totalQs / targetPages);
+      }
     }
   }
 
   const pageChunks: Array<typeof questions> = [];
-  for (let i = 0; i < questions.length; i += effectiveChunkSize) {
+  for (let i = 0; i < totalQs; i += effectiveChunkSize) {
     pageChunks.push(questions.slice(i, i + effectiveChunkSize));
   }
   if (pageChunks.length === 0) pageChunks.push([]);
   const totalPages = pageChunks.length;
 
   return (
-    <div className="exam-pages-container space-y-8 print:space-y-0">
+    <div className="exam-pages-container space-y-8 print:space-y-0 print:m-0 print:p-0">
       <style dangerouslySetInnerHTML={{ __html: `
         @media print {
           @page {
             size: A4 portrait;
-            margin: 4mm 5mm 4mm 5mm !important;
+            margin: 0 !important;
           }
           html, body {
             width: 210mm !important;
+            height: 297mm !important;
             margin: 0 !important;
             padding: 0 !important;
             background: white !important;
@@ -541,17 +560,23 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
           .print-page-wrapper {
             page-break-after: always !important;
             break-after: page !important;
+            margin: 0 !important;
+            padding: 0 !important;
+          }
+          .exam-pages-container {
+            margin: 0 !important;
+            padding: 0 !important;
           }
           .exam-a4-page {
-            width: 100% !important;
-            max-width: 100% !important;
-            height: 288mm !important;
-            max-height: 288mm !important;
-            min-height: 288mm !important;
+            width: 200mm !important;
+            max-width: 200mm !important;
+            height: 287mm !important;
+            max-height: 287mm !important;
+            min-height: 287mm !important;
             overflow: hidden !important;
             box-sizing: border-box !important;
-            margin: 0 !important;
-            padding: 3.5mm 5mm !important;
+            margin: 5mm auto !important;
+            padding: 4mm 6mm !important;
             page-break-inside: avoid !important;
             break-inside: avoid !important;
             page-break-after: always !important;
