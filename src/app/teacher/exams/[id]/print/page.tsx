@@ -78,6 +78,7 @@ export default function ExamPrintPage() {
   const [questionsPerPage, setQuestionsPerPage] = useState<number>(0);
   const [autoScaleFont, setAutoScaleFont] = useState<boolean>(true);
   const [fontSize, setFontSize] = useState<'xs' | 'sm' | 'base' | 'lg' | 'xl'>('base');
+  const [imagePosition, setImagePosition] = useState<'inline' | 'below'>('inline');
   const [selectedModelTab, setSelectedModelTab] = useState<string>('all');
 
   // Saving state
@@ -114,6 +115,7 @@ export default function ExamPrintPage() {
       setQuestionsPerPage(cfg.questionsPerPage || 0);
       setAutoScaleFont(cfg.autoScaleFont ?? true);
       setFontSize(cfg.fontSize || 'base');
+      setImagePosition(cfg.imagePosition || 'inline');
     } catch (e) {
       console.warn('Using default paper config:', e);
     }
@@ -204,6 +206,9 @@ export default function ExamPrintPage() {
   // Handle Questions Per Page Change with Auto Font Scaling
   function handleQuestionsPerPageChange(val: number) {
     setQuestionsPerPage(val);
+    if (val >= 5) {
+      setImagePosition('inline');
+    }
     if (autoScaleFont && val > 0) {
       if (quickColumns === 2) {
         if (val <= 4) setFontSize('base');
@@ -211,8 +216,8 @@ export default function ExamPrintPage() {
         else setFontSize('xs');
       } else {
         if (val <= 2) setFontSize('lg');
-        else if (val <= 4) setFontSize('base');
-        else if (val <= 6) setFontSize('sm');
+        else if (val <= 3) setFontSize('base');
+        else if (val <= 5) setFontSize('sm');
         else setFontSize('xs');
       }
     }
@@ -244,6 +249,7 @@ export default function ExamPrintPage() {
         questionsPerPage,
         autoScaleFont,
         fontSize,
+        imagePosition,
       };
       await savePaperTemplateConfig(updatedConfig, `exam_${exam.id}`);
       setConfig(updatedConfig);
@@ -312,6 +318,7 @@ export default function ExamPrintPage() {
     questionsPerPage: questionsPerPage,
     autoScaleFont: autoScaleFont,
     fontSize: fontSize,
+    imagePosition: imagePosition,
   };
 
   return (
@@ -498,6 +505,35 @@ export default function ExamPrintPage() {
                 }`}
               >
                 عمودين (توفير)
+              </button>
+            </div>
+
+            {/* 5. Image Position Mode */}
+            <div className="flex items-center gap-1 bg-white p-1 rounded-xl border border-slate-200 shadow-2xs">
+              <span className="text-slate-500 pr-1 text-[11px]">موضع الصور:</span>
+              <button
+                type="button"
+                onClick={() => setImagePosition('inline')}
+                className={`px-2 py-0.5 rounded-lg transition ${
+                  imagePosition === 'inline'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+                title="عرض الرسم بجانب نص السؤال لتوفير مساحة كبيرة ومنع زيادة الصفحات"
+              >
+                بجانب السؤال (مدمج)
+              </button>
+              <button
+                type="button"
+                onClick={() => setImagePosition('below')}
+                className={`px-2 py-0.5 rounded-lg transition ${
+                  imagePosition === 'below'
+                    ? 'bg-blue-600 text-white shadow-xs'
+                    : 'text-slate-600 hover:bg-slate-100'
+                }`}
+                title="عرض الرسم تحت نص السؤال"
+              >
+                تحت السؤال
               </button>
             </div>
           </div>

@@ -10,6 +10,7 @@ export interface ExamPaperConfig {
   themeColor: string; // e.g., '#1e3a8a' or '#0f172a'
   questionsPerPage?: number; // 0 = continuous auto flow; 2, 3, 4, 5, 6, 8 = fixed per page
   autoScaleFont?: boolean; // auto adjust font and spacing based on questionsPerPage
+  imagePosition?: 'inline' | 'below'; // display images side-by-side or below question
 
   // Header Details
   header: {
@@ -81,6 +82,7 @@ export const DEFAULT_PAPER_CONFIG: ExamPaperConfig = {
   themeColor: '#1e3a8a',
   questionsPerPage: 0,
   autoScaleFont: true,
+  imagePosition: 'inline',
 
   header: {
     ministryLine: 'جمهورية مصر العربية - وزارة التربية والتعليم',
