@@ -101,6 +101,16 @@ export default function ExamPrintPage() {
       .order('model_code');
     setModels(modelsData || []);
 
+    // 1. Collect all question IDs from all models
+    const allQids = Array.from(
+      new Set(
+        (modelsData || [])
+          .flatMap((m: any) => m.questions_order || [])
+          .map((qid: string) => (qid.includes('_var_') ? qid.split('_var_')[0] : qid))
+      )
+    );
+
+    // 2. Query exam_questions join
     const { data: examQs } = await supabase
       .from('exam_questions')
       .select(`
@@ -116,6 +126,23 @@ export default function ExamPrintPage() {
     (examQs || []).forEach((eq: any) => {
       if (eq.questions) qMap[eq.questions.id] = { ...eq.questions };
     });
+
+    // 3. Fallback: If any questions from models are not in exam_questions, fetch directly by ID
+    const missingQids = allQids.filter((qid) => !qMap[qid]);
+    if (missingQids.length > 0) {
+      const { data: directQs } = await supabase
+        .from('questions')
+        .select(`
+          id, text, question_type, model_answer, chapter, image_urls, marks,
+          choices:question_choices(*)
+        `)
+        .in('id', missingQids);
+
+      (directQs || []).forEach((q: any) => {
+        qMap[q.id] = { ...q };
+      });
+    }
+
     setQuestions(qMap);
     setLoading(false);
   }
@@ -125,8 +152,10 @@ export default function ExamPrintPage() {
     const choiceLetters = ['أ', 'ب', 'ج', 'د', 'هـ', 'و'];
 
     (model.questions_order || []).forEach((qid) => {
-      if (!questions[qid]) return;
-      const q = { ...questions[qid] };
+      const baseId = qid.includes('_var_') ? qid.split('_var_')[0] : qid;
+      const qSource = questions[qid] || questions[baseId];
+      if (!qSource) return;
+      const q = { ...qSource };
       if (model.choices_order?.[qid] && q.choices && q.choices.length > 1) {
         const order = model.choices_order[qid];
         q.choices = [...q.choices]
@@ -342,7 +371,17 @@ export default function ExamPrintPage() {
             size: A4 portrait;
             margin: 10mm 8mm;
           }
-          html, body {
+          *, *:before, *:after {
+            box-sizing: border-box !important;
+          }
+          html, body, div, main {
+            overflow: visible !important;
+            height: auto !important;
+            min-height: 0 !important;
+            max-height: none !important;
+            float: none !important;
+          }
+          body {
             background: white !important;
             margin: 0 !important;
             padding: 0 !important;
@@ -372,9 +411,15 @@ export default function ExamPrintPage() {
             page-break-after: auto;
             break-after: auto;
           }
+          section {
+            display: block !important;
+            margin-bottom: 1.5rem !important;
+          }
           article {
             break-inside: avoid !important;
             page-break-inside: avoid !important;
+            display: block !important;
+            margin-bottom: 1rem !important;
           }
         }
       `}</style>

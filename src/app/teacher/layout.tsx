@@ -42,7 +42,7 @@ export default function TeacherLayout({
   const [isSidebarOpen, setIsSidebarOpen] = useState(false);
 
   return (
-    <div className="min-h-screen flex bg-slate-100">
+    <div className="min-h-screen flex bg-slate-100 print:block print:min-h-0 print:h-auto print:bg-white">
       {/* Mobile Sidebar Overlay */}
       {isSidebarOpen && (
         <div 
@@ -109,7 +109,7 @@ export default function TeacherLayout({
         </div>
       </aside>
 
-      <div className="flex-1 flex flex-col min-h-screen overflow-hidden print:overflow-visible print:bg-white print:min-h-0">
+      <div className="flex-1 flex flex-col min-h-screen overflow-hidden print:block print:overflow-visible print:bg-white print:min-h-0 print:h-auto">
         <header className="print:hidden h-16 bg-white border-b border-slate-200 px-4 md:px-8 flex items-center justify-between shadow-sm sticky top-0 z-30">
           <div className="flex items-center gap-3">
             <button 
@@ -128,7 +128,7 @@ export default function TeacherLayout({
             </span>
           </div>
         </header>
-        <main className="flex-1 p-4 md:p-8 overflow-y-auto print:overflow-visible print:p-0 print:m-0">{children}</main>
+        <main className="flex-1 p-4 md:p-8 overflow-y-auto print:block print:min-h-0 print:h-auto print:overflow-visible print:p-0 print:m-0">{children}</main>
       </div>
     </div>
   );

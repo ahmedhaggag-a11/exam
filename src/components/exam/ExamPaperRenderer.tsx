@@ -40,9 +40,9 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
   questions,
   isPreview = false,
 }) => {
-  const mcqs = questions.filter(q => q.question_type === 'mcq');
-  const tfs = questions.filter(q => q.question_type === 'true_false');
-  const essays = questions.filter(q => q.question_type === 'essay');
+  const mcqs = questions.filter(q => q.question_type === 'mcq' || q.question_type === 'multiple_choice' || (q.choices && q.choices.length > 0));
+  const tfs = questions.filter(q => q.question_type === 'true_false' || q.question_type === 'صح أو خطأ');
+  const essays = questions.filter(q => !mcqs.includes(q) && !tfs.includes(q));
 
   const [qrCodeDataUrl, setQrCodeDataUrl] = useState<string>('');
 
