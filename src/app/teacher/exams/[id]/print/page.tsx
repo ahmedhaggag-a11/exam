@@ -241,14 +241,24 @@ export default function ExamPrintPage() {
             <span className="text-slate-700">تضمين نموذج الإجابة</span>
           </label>
 
-          {/* Print Button */}
-          <button
-            onClick={handlePrint}
-            className="flex items-center gap-2 px-5 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-bold shadow-md shadow-blue-600/20 transition"
-          >
-            <Printer className="w-4 h-4" />
-            <span>طباعة الورقة (Print / PDF)</span>
-          </button>
+          {/* Action Buttons: Save PDF / Print */}
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handlePrint}
+              className="flex items-center gap-1.5 px-4 py-2 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl font-black shadow-md shadow-emerald-600/20 transition text-xs"
+              title="احفظ الامتحان كملف PDF نظيف من خيار 'حفظ بتنسيق PDF' في الطابعة"
+            >
+              <span>💾 حفظ كـ PDF</span>
+            </button>
+
+            <button
+              onClick={handlePrint}
+              className="flex items-center gap-1.5 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl font-black shadow-md shadow-blue-600/20 transition text-xs"
+            >
+              <Printer className="w-4 h-4" />
+              <span>🖨️ طباعة الامتحان</span>
+            </button>
+          </div>
         </div>
       </nav>
 
@@ -328,17 +338,24 @@ export default function ExamPrintPage() {
       {/* Global CSS for Print Output */}
       <style jsx global>{`
         @media print {
-          .no-print {
+          @page {
+            size: A4 portrait;
+            margin: 10mm 8mm;
+          }
+          html, body {
+            background: white !important;
+            margin: 0 !important;
+            padding: 0 !important;
+            -webkit-print-color-adjust: exact !important;
+            print-color-adjust: exact !important;
+          }
+          nav, aside, header, .no-print {
             display: none !important;
           }
           .no-print-bg {
             background: white !important;
             padding: 0 !important;
             margin: 0 !important;
-          }
-          body {
-            padding: 0 !important;
-            background: white !important;
           }
           .print-page-wrapper {
             page-break-after: always;
@@ -347,8 +364,12 @@ export default function ExamPrintPage() {
             padding: 0 !important;
           }
           .print-page-wrapper:last-child {
-            page-break-after: avoid;
-            break-after: avoid;
+            page-break-after: auto;
+            break-after: auto;
+          }
+          article {
+            break-inside: avoid !important;
+            page-break-inside: avoid !important;
           }
         }
       `}</style>

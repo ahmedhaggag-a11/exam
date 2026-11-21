@@ -22,6 +22,7 @@ import {
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 import { Question } from '@/types/database';
 import { updateQuestionImageAction, getSourcePdfUrlAction, removeQuestionImageAction } from '@/app/admin/question-bank/actions';
+import { cachePdfFile, getCachedPdf } from '@/lib/utils/pdf-cache';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
@@ -90,42 +91,57 @@ export default function RecropModal({
     setUploadedBase64(null);
     setActionMsg(null);
 
-    // Try to load PDF from source
-    if (question.source_id) {
-      loadPdfFromSource(question.source_id);
-    } else {
-      setPdfError('لا يوجد ملف PDF مرتبط بهذا السؤال تلقائياً. يمكنك اختيار ملف الـ PDF للكتاب من جهازك أدناه.');
-    }
+    // Try to load PDF from cache or source
+    loadPdfAuto(question.source_id);
   }, [isOpen, question]);
 
-  // Load PDF via signed URL from storage
-  const loadPdfFromSource = async (sourceId: string) => {
+  // Load PDF automatically: checks local IndexedDB cache first, then cloud storage
+  const loadPdfAuto = async (sourceId?: string | null) => {
     try {
       setLoadingPdf(true);
       setPdfError(null);
-      const res = await getSourcePdfUrlAction(sourceId);
-      if (!res.success || !res.url) {
-        throw new Error(res.error || 'تعذر جلب ملف الـ PDF من التخزين');
+
+      // 1. Try local IndexedDB cache first (instant, zero network latency)
+      const cached = await getCachedPdf(sourceId || undefined);
+      if (cached) {
+        const data = new Uint8Array(cached);
+        const doc = await pdfjsLib.getDocument({ data }).promise;
+        setPdfDoc(doc);
+        setTotalPages(doc.numPages);
+        setLoadingPdf(false);
+        return;
       }
 
-      // Fetch array buffer
-      const response = await fetch(res.url);
-      if (!response.ok) throw new Error('فشل تحميل ملف الـ PDF من الخادم');
-      const arrayBuffer = await response.arrayBuffer();
-      const data = new Uint8Array(arrayBuffer);
-      const doc = await pdfjsLib.getDocument({ data }).promise;
+      // 2. Try Supabase cloud signed URL if source_id is present
+      if (sourceId) {
+        const res = await getSourcePdfUrlAction(sourceId);
+        if (res.success && res.url) {
+          const response = await fetch(res.url);
+          if (response.ok) {
+            const arrayBuffer = await response.arrayBuffer();
+            const data = new Uint8Array(arrayBuffer);
+            const doc = await pdfjsLib.getDocument({ data }).promise;
+            setPdfDoc(doc);
+            setTotalPages(doc.numPages);
+            // Save to local cache for future questions
+            cachePdfFile(sourceId, arrayBuffer);
+            setLoadingPdf(false);
+            return;
+          }
+        }
+      }
 
-      setPdfDoc(doc);
-      setTotalPages(doc.numPages);
+      // 3. Fallback: Prompt teacher to pick book PDF once
+      setPdfError('اختر ملف الـ PDF الخاص بالكتاب لقص السؤال مباشرة (يُحفظ في جهازك تلقائياً لقص باقي الأسئلة فوراً)');
     } catch (err: any) {
       console.warn('Could not auto-load source PDF:', err);
-      setPdfError('لم يتم العثور على ملف الـ PDF في التخزين السحابي. يرجى اختيار ملف الكتاب من جهازك لعرض صفحاته.');
+      setPdfError('اختر ملف الـ PDF الخاص بالكتاب لقص السؤال مباشرة (يُحفظ في جهازك تلقائياً لقص باقي الأسئلة فوراً)');
     } finally {
       setLoadingPdf(false);
     }
   };
 
-  // Load PDF from local file picker
+  // Load PDF from local file picker & cache in IndexedDB
   const handleLocalPdfSelected = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file) return;
@@ -139,7 +155,10 @@ export default function RecropModal({
 
       setPdfDoc(doc);
       setTotalPages(doc.numPages);
-      setCurrentPage(1);
+      setCurrentPage(question?.source_page && question.source_page > 0 ? question.source_page : 1);
+
+      // Cache locally in IndexedDB so all other questions load it instantly
+      await cachePdfFile(question?.source_id || 'active_book', arrayBuffer);
     } catch (err: any) {
       setPdfError('تعذر فتح ملف الـ PDF المختار: ' + err.message);
     } finally {
@@ -525,14 +544,31 @@ export default function RecropModal({
                   <span className="text-xs font-bold">جاري تحميل ملف الـ PDF...</span>
                 </div>
               ) : pdfError && !pdfDoc ? (
-                <div className="p-8 text-center bg-amber-50 rounded-2xl border border-amber-200 space-y-3">
-                  <AlertTriangle className="w-8 h-8 text-amber-600 mx-auto" />
-                  <p className="text-xs sm:text-sm font-bold text-amber-900">{pdfError}</p>
+                <div 
+                  onClick={() => pdfFileInputRef.current?.click()}
+                  className="p-10 text-center bg-blue-50/50 hover:bg-blue-50/80 rounded-3xl border-2 border-dashed border-blue-300 hover:border-blue-500 cursor-pointer transition space-y-3"
+                >
+                  <div className="w-14 h-14 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+                    <FileText className="w-7 h-7" />
+                  </div>
+                  <div>
+                    <h3 className="text-sm font-black text-slate-800">
+                      اضغط هنا لفتح ملف الـ PDF للكتاب من جهازك
+                    </h3>
+                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
+                      اختر ملف الكتاب مرة واحدة فقط، وسيتم حفظه تلقائياً في متصفحك لقص أي سؤال آخر فوراً بدون تكرار الاختيار.
+                    </p>
+                  </div>
                   <button
-                    onClick={() => pdfFileInputRef.current?.click()}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold shadow-md transition"
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      pdfFileInputRef.current?.click();
+                    }}
+                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-md shadow-blue-600/20 transition inline-flex items-center gap-2"
                   >
-                    📁 اختيار ملف PDF الكتاب من جهازك
+                    <Upload className="w-4 h-4" />
+                    <span>📁 اختيار ملف الـ PDF</span>
                   </button>
                 </div>
               ) : (

@@ -111,7 +111,7 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
       } ${borderClasses[config.pageBorder] || 'border'} ${
         isPreview
           ? 'p-6 max-w-4xl shadow-lg rounded-xl text-sm'
-          : 'p-8 sm:p-10 max-w-5xl shadow-md min-h-[1100px]'
+          : 'p-8 sm:p-10 max-w-5xl shadow-md min-h-[1100px] print:min-h-0 print:p-5 print:max-w-none print:shadow-none'
       }`}
       style={{
         fontSize: config.fontSize === 'sm' ? '0.875rem' : config.fontSize === 'lg' ? '1.125rem' : '1rem',
@@ -301,8 +301,8 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
       >
         {/* 1. MCQ Section */}
         {mcqs.length > 0 && (
-          <section className="mb-6 break-inside-avoid-page">
-            <h2 className="font-black text-sm text-slate-900 border-b-2 border-slate-800 pb-1 mb-3 flex items-center justify-between">
+          <section className="mb-6">
+            <h2 className="font-black text-sm text-slate-900 border-b-2 border-slate-800 pb-1 mb-3 flex items-center justify-between break-after-avoid">
               <span>السؤال الأول: اختر الإجابة الصحيحة من بين البدائل المعطاة</span>
               <span className="text-xs font-normal text-slate-500">
                 ({mcqs.length} أسئلة)
@@ -358,8 +358,8 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
 
         {/* 2. True / False Section */}
         {tfs.length > 0 && (
-          <section className="mb-6 break-inside-avoid-page">
-            <h2 className="font-black text-sm text-slate-900 border-b-2 border-slate-800 pb-1 mb-3 flex items-center justify-between">
+          <section className="mb-6">
+            <h2 className="font-black text-sm text-slate-900 border-b-2 border-slate-800 pb-1 mb-3 flex items-center justify-between break-after-avoid">
               <span>السؤال الثاني: ضع علامة (✓) أمام العبارة الصحيحة وعلامة (✗) أمام الخطأ</span>
               <span className="text-xs font-normal text-slate-500">
                 ({tfs.length} أسئلة)
@@ -400,8 +400,8 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
 
         {/* 3. Essay Section */}
         {essays.length > 0 && (
-          <section className="mb-6 break-inside-avoid-page">
-            <h2 className="font-black text-sm text-slate-900 border-b-2 border-slate-800 pb-1 mb-3 flex items-center justify-between">
+          <section className="mb-6">
+            <h2 className="font-black text-sm text-slate-900 border-b-2 border-slate-800 pb-1 mb-3 flex items-center justify-between break-after-avoid">
               <span>الأسئلة المقالية: أجب عن الأسئلة الآتية موضحاً خطوات الحل</span>
               <span className="text-xs font-normal text-slate-500">
                 ({essays.length} أسئلة)

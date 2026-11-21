@@ -30,6 +30,7 @@ import {
   uploadImageFromBase64,
   analyzeBookStructureAction,
 } from './actions';
+import { cachePdfFile } from '@/lib/utils/pdf-cache';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
 
@@ -193,6 +194,9 @@ export default function AdminUploadPDFPage() {
         loadedPdfDocRef.current = pdfDoc;
         const pages = pdfDoc.numPages;
         setTotalPages(pages);
+
+        // Cache PDF in IndexedDB for seamless question re-cropping across the app
+        cachePdfFile('last_active_pdf', arrayBuffer);
 
         // Auto-recommend chunk size based on file weight
         let activeChunkSize = chunkSize;

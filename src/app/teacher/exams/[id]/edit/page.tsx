@@ -4,7 +4,8 @@ import { useState, useEffect } from 'react';
 import { useParams, useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { createClient } from '@/lib/supabase/client';
-import { ArrowUp, ArrowDown, Shuffle, BookOpen, ArrowUpDown } from 'lucide-react';
+import { ArrowUp, ArrowDown, Shuffle, BookOpen, ArrowUpDown, Crop } from 'lucide-react';
+import RecropModal from '@/components/RecropModal';
 
 interface ExamModel {
   id: string;
@@ -31,6 +32,9 @@ interface Question {
   chapter: string | null;
   marks?: number;
   image_urls: string[] | null;
+  teacher_id?: string;
+  source_id?: string | null;
+  source_page?: number | null;
 }
 
 interface Exam {
@@ -61,6 +65,10 @@ export default function ExamEditPage() {
   const [editText, setEditText] = useState('');
   const [error, setError] = useState('');
 
+  // Re-crop Modal state
+  const [recropModalOpen, setRecropModalOpen] = useState(false);
+  const [selectedRecropQuestion, setSelectedRecropQuestion] = useState<any | null>(null);
+
   useEffect(() => { loadExam(); }, [id]);
 
   async function loadExam() {
@@ -90,7 +98,7 @@ export default function ExamEditPage() {
         question_id,
         order_index,
         questions (
-          id, text, question_type, model_answer, chapter, image_urls,
+          id, text, question_type, model_answer, chapter, image_urls, teacher_id, source_id, source_page,
           choices:question_choices(*)
         )
       `)
@@ -210,6 +218,35 @@ export default function ExamEditPage() {
     setExam(prev => prev ? { ...prev, status } : prev);
     setSaving(false);
   }
+
+  const handleImageUpdated = (questionId: string, newImageUrl: string) => {
+    setQuestions((prev) => {
+      const existingQ = prev[questionId];
+      if (!existingQ) return prev;
+      const existingUrls = existingQ.image_urls || [];
+      return {
+        ...prev,
+        [questionId]: {
+          ...existingQ,
+          image_urls: [newImageUrl, ...existingUrls.filter((u) => u !== newImageUrl)],
+        },
+      };
+    });
+  };
+
+  const handleImageRemoved = (questionId: string) => {
+    setQuestions((prev) => {
+      const existingQ = prev[questionId];
+      if (!existingQ) return prev;
+      return {
+        ...prev,
+        [questionId]: {
+          ...existingQ,
+          image_urls: [],
+        },
+      };
+    });
+  };
 
   if (loading) return (
     <div className="flex items-center justify-center h-64">
@@ -346,9 +383,34 @@ export default function ExamEditPage() {
                   ) : (
                     <>
                       <p className="text-sm text-gray-800 font-medium leading-relaxed">{q.text}</p>
-                      {q.image_urls && q.image_urls.length > 0 && (
-                        <div className="my-3">
-                          <img src={q.image_urls[0]} alt="صورة توضيحية" className="max-w-full h-auto max-h-40 border border-gray-200 rounded object-contain" />
+                      {q.image_urls && q.image_urls.length > 0 ? (
+                        <div className="my-3 p-2 bg-slate-50 border border-slate-200 rounded-xl flex items-center justify-between gap-3">
+                          <img src={q.image_urls[0]} alt="صورة توضيحية" className="max-w-full h-auto max-h-40 border border-gray-200 rounded object-contain bg-white" />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedRecropQuestion(q);
+                              setRecropModalOpen(true);
+                            }}
+                            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0"
+                          >
+                            <Crop className="w-3.5 h-3.5 text-blue-600" />
+                            <span>🔄 إعادة قص / تعديل الصورة</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedRecropQuestion(q);
+                              setRecropModalOpen(true);
+                            }}
+                            className="text-[11px] font-bold text-slate-400 hover:text-blue-600 flex items-center gap-1 transition"
+                          >
+                            <Crop className="w-3 h-3" />
+                            <span>➕ قص / إضافة صورة لهذا السؤال</span>
+                          </button>
                         </div>
                       )}
                     </>
@@ -403,6 +465,18 @@ export default function ExamEditPage() {
           <p className="text-center text-gray-400 py-8">لا توجد أسئلة في هذا النموذج</p>
         )}
       </div>
+
+      {/* Interactive Re-crop Modal */}
+      <RecropModal
+        isOpen={recropModalOpen}
+        question={selectedRecropQuestion}
+        onClose={() => {
+          setRecropModalOpen(false);
+          setSelectedRecropQuestion(null);
+        }}
+        onImageUpdated={handleImageUpdated}
+        onImageRemoved={handleImageRemoved}
+      />
     </div>
   );
 }

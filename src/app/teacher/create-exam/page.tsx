@@ -28,7 +28,9 @@ import {
   ArrowDown,
   ArrowUpDown,
   ListOrdered,
+  Crop,
 } from 'lucide-react';
+import RecropModal from '@/components/RecropModal';
 
 interface Subject { id: string; name: string; }
 interface SourceItem { id: string; name: string; }
@@ -46,6 +48,9 @@ interface Question {
   source_id?: string | null;
   marks?: number;
   model_answer?: string | null;
+  image_urls?: string[] | null;
+  teacher_id?: string;
+  source_page?: number | null;
   choices?: Array<{ id: string; choice_code: string; text: string; is_correct: boolean; order_index: number }>;
 }
 
@@ -75,6 +80,10 @@ export default function CreateExamPage() {
   const [activeModel, setActiveModel] = useState(0);
   const [error, setError] = useState('');
   const [reasoning, setReasoning] = useState('');
+
+  // Re-crop Modal state for Create Exam
+  const [recropModalOpen, setRecropModalOpen] = useState(false);
+  const [selectedRecropQuestion, setSelectedRecropQuestion] = useState<any | null>(null);
 
   // ── Step 0
   const [title, setTitle] = useState('');
@@ -335,6 +344,41 @@ export default function CreateExamPage() {
 
   function handleSyncTotalWithSum() {
     setTotalMark(currentSumMarks);
+  }
+
+  function handleImageUpdated(questionId: string, newImageUrl: string) {
+    setGeneratedModels((prevModels) =>
+      prevModels.map((model) => ({
+        ...model,
+        questions: model.questions.map((q: any) => {
+          if (q.id === questionId || q.original_id === questionId) {
+            const existing = q.image_urls || [];
+            return {
+              ...q,
+              image_urls: [newImageUrl, ...existing.filter((u: string) => u !== newImageUrl)],
+            };
+          }
+          return q;
+        }),
+      }))
+    );
+  }
+
+  function handleImageRemoved(questionId: string) {
+    setGeneratedModels((prevModels) =>
+      prevModels.map((model) => ({
+        ...model,
+        questions: model.questions.map((q: any) => {
+          if (q.id === questionId || q.original_id === questionId) {
+            return {
+              ...q,
+              image_urls: [],
+            };
+          }
+          return q;
+        }),
+      }))
+    );
   }
 
   async function handleGenerate() {
@@ -1481,6 +1525,43 @@ export default function CreateExamPage() {
                       </div>
 
                       <p className="text-sm font-bold text-slate-800 leading-relaxed pt-1">{q.text || q.question_text}</p>
+
+                      {/* Question Image & Re-crop in Create Exam */}
+                      {q.image_urls && q.image_urls.length > 0 ? (
+                        <div className="my-2 p-2.5 bg-slate-50 border border-slate-200 rounded-xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
+                          <img
+                            src={q.image_urls[0]}
+                            alt="صورة السؤال"
+                            className="max-h-36 max-w-xs object-contain rounded-lg border border-slate-200 bg-white"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedRecropQuestion(q);
+                              setRecropModalOpen(true);
+                            }}
+                            className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0"
+                          >
+                            <Crop className="w-3.5 h-3.5 text-blue-600" />
+                            <span>🔄 إعادة قص / تعديل الصورة</span>
+                          </button>
+                        </div>
+                      ) : (
+                        <div className="pt-1">
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setSelectedRecropQuestion(q);
+                              setRecropModalOpen(true);
+                            }}
+                            className="text-[11px] font-bold text-slate-400 hover:text-blue-600 flex items-center gap-1 transition"
+                          >
+                            <Crop className="w-3 h-3" />
+                            <span>➕ قص / إضافة صورة لهذا السؤال</span>
+                          </button>
+                        </div>
+                      )}
+
                       {q.choices?.length > 0 && (
                         <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
                           {[...q.choices].sort((a: any, b: any) => a.order_index - b.order_index).map((c: any, ci: number) => (
@@ -1621,6 +1702,18 @@ export default function CreateExamPage() {
           </div>
         </div>
       )}
+
+      {/* Interactive Re-crop Modal during exam creation */}
+      <RecropModal
+        isOpen={recropModalOpen}
+        question={selectedRecropQuestion}
+        onClose={() => {
+          setRecropModalOpen(false);
+          setSelectedRecropQuestion(null);
+        }}
+        onImageUpdated={handleImageUpdated}
+        onImageRemoved={handleImageRemoved}
+      />
     </div>
   );
 }
