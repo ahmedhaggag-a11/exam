@@ -150,7 +150,7 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
       )}
 
       {/* HEADER SECTION */}
-      <header className="relative z-10 border-b-2 border-slate-900 pb-4 mb-6">
+      <div className="exam-paper-header relative z-10 border-b-2 border-slate-900 pb-4 mb-6 print:block">
         {/* Style: Formal 3-column Ministry */}
         {config.headerStyle === 'formal' && (
           <div className="flex items-start justify-between gap-4 mb-3">
@@ -291,7 +291,7 @@ export const ExamPaperRenderer: React.FC<PaperRendererProps> = ({
             {exam.instructions}
           </div>
         )}
-      </header>
+      </div>
 
       {/* QUESTIONS BODY */}
       <main

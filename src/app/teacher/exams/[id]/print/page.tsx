@@ -349,8 +349,13 @@ export default function ExamPrintPage() {
             -webkit-print-color-adjust: exact !important;
             print-color-adjust: exact !important;
           }
-          nav, aside, header, .no-print {
+          nav.no-print, aside, .no-print {
             display: none !important;
+          }
+          .exam-paper-header {
+            display: block !important;
+            visibility: visible !important;
+            opacity: 1 !important;
           }
           .no-print-bg {
             background: white !important;
