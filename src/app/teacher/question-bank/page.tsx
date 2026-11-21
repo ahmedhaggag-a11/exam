@@ -12,9 +12,11 @@ import {
   GraduationCap, 
   HelpCircle, 
   Gauge, 
-  Trash2 
+  Trash2,
+  Crop 
 } from 'lucide-react';
 import { Question } from '@/types/database';
+import RecropModal from '@/components/RecropModal';
 
 interface SourceItem {
   id: string;
@@ -36,6 +38,10 @@ export default function TeacherQuestionBankPage() {
   const [selectedLesson, setSelectedLesson] = useState<string>('all');
   const [selectedType, setSelectedType] = useState<string>('all');
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('all');
+
+  // Re-crop Modal state
+  const [recropModalOpen, setRecropModalOpen] = useState(false);
+  const [selectedRecropQuestion, setSelectedRecropQuestion] = useState<Question | null>(null);
 
   const supabase = createClient();
 
@@ -248,6 +254,21 @@ export default function TeacherQuestionBankPage() {
       alert('خطأ أثناء إزالة الصورة: ' + err.message);
     }
   }
+
+  const handleImageUpdated = (questionId: string, newImageUrl: string) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id === questionId) {
+          const existing = q.image_urls || [];
+          return {
+            ...q,
+            image_urls: [newImageUrl, ...existing.filter((u) => u !== newImageUrl)],
+          };
+        }
+        return q;
+      })
+    );
+  };
 
   return (
     <div className="space-y-6">
@@ -491,9 +512,24 @@ export default function TeacherQuestionBankPage() {
                     )}
                   </div>
 
-                  <span className="text-xs text-slate-400 font-semibold">
-                    {q.marks || 2} درجات
-                  </span>
+                  <div className="flex items-center gap-2">
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setSelectedRecropQuestion(q);
+                        setRecropModalOpen(true);
+                      }}
+                      className="px-2.5 py-1 text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 flex items-center gap-1.5 transition shrink-0"
+                      title="إعادة قص أو تعديل صورة هذا السؤال"
+                    >
+                      <Crop className="w-3.5 h-3.5 text-blue-600" />
+                      <span>{q.image_urls && q.image_urls.length > 0 ? '🔄 إعادة قص / تعديل الصورة' : '➕ قص / إضافة صورة'}</span>
+                    </button>
+
+                    <span className="text-xs text-slate-400 font-semibold">
+                      {q.marks || 2} درجات
+                    </span>
+                  </div>
                 </div>
 
                 <p className="font-bold text-slate-800 text-base leading-relaxed pr-1">{q.text}</p>
@@ -501,19 +537,34 @@ export default function TeacherQuestionBankPage() {
                 {/* Display Image if present */}
                 {q.image_urls && q.image_urls.length > 0 && (
                   <div className="my-3 p-3 bg-slate-50 rounded-2xl border border-slate-200 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
-                    <img
-                      src={q.image_urls[0]}
-                      alt="صورة السؤال"
-                      className="max-w-full h-auto max-h-56 rounded-xl border border-slate-200 shadow-xs bg-white"
-                    />
-                    <button
-                      type="button"
-                      onClick={() => handleRemoveImage(q.id)}
-                      className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0"
-                    >
-                      <Trash2 className="w-3.5 h-3.5 text-red-500" />
-                      <span>حذف الصورة (إن كانت نصاً مكرراً)</span>
-                    </button>
+                    <div className="relative inline-block group">
+                      <img
+                        src={q.image_urls[0]}
+                        alt="صورة السؤال"
+                        className="max-w-full h-auto max-h-56 rounded-xl border border-slate-200 shadow-xs bg-white"
+                      />
+                    </div>
+                    <div className="flex flex-col sm:flex-row gap-2 shrink-0">
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setSelectedRecropQuestion(q);
+                          setRecropModalOpen(true);
+                        }}
+                        className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+                      >
+                        <Crop className="w-3.5 h-3.5 text-blue-600" />
+                        <span>إعادة قص من الكتاب</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveImage(q.id)}
+                        className="px-3 py-1.5 bg-red-50 hover:bg-red-100 text-red-700 border border-red-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+                      >
+                        <Trash2 className="w-3.5 h-3.5 text-red-500" />
+                        <span>حذف الصورة نهائياً</span>
+                      </button>
+                    </div>
                   </div>
                 )}
 
@@ -548,6 +599,22 @@ export default function TeacherQuestionBankPage() {
           </div>
         )}
       </div>
+
+      {/* Interactive Re-crop Modal */}
+      <RecropModal
+        isOpen={recropModalOpen}
+        question={selectedRecropQuestion}
+        onClose={() => {
+          setRecropModalOpen(false);
+          setSelectedRecropQuestion(null);
+        }}
+        onImageUpdated={handleImageUpdated}
+        onImageRemoved={(qId) => {
+          setQuestions((prev) =>
+            prev.map((q) => (q.id === qId ? { ...q, image_urls: [] } : q))
+          );
+        }}
+      />
     </div>
   );
 }

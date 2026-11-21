@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState, useMemo } from 'react';
+import { useEffect, useState, useMemo, useRef, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import {
   Filter,
@@ -12,9 +12,19 @@ import {
   Layers,
   Bookmark,
   HelpCircle,
-  Sparkles
+  Sparkles,
+  Crop,
+  Upload,
+  X,
+  ZoomIn,
+  ZoomOut,
+  RefreshCw,
+  CheckCircle,
+  AlertCircle,
+  FileImage
 } from 'lucide-react';
 import { Question } from '@/types/database';
+import RecropModal from '@/components/RecropModal';
 
 interface TeacherProfile {
   id: string;
@@ -46,6 +56,10 @@ export default function AdminQuestionBankPage() {
   const [selectedLesson, setSelectedLesson] = useState<string>('all');   // Filter 4
   const [selectedType, setSelectedType] = useState<string>('all');      // Filter 5
   const [selectedDifficulty, setSelectedDifficulty] = useState<string>('all'); // Filter 6: الصعوبة
+
+  // Re-crop Modal state
+  const [recropModalOpen, setRecropModalOpen] = useState(false);
+  const [selectedRecropQuestion, setSelectedRecropQuestion] = useState<Question | null>(null);
 
   const supabase = createClient();
 
@@ -269,6 +283,35 @@ export default function AdminQuestionBankPage() {
     setSelectedLesson('all');
     setSelectedType('all');
     setSelectedDifficulty('all');
+  };
+
+  const handleImageUpdated = (questionId: string, newImageUrl: string) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id === questionId) {
+          const existing = q.image_urls || [];
+          return {
+            ...q,
+            image_urls: [newImageUrl, ...existing.filter((u) => u !== newImageUrl)],
+          };
+        }
+        return q;
+      })
+    );
+  };
+
+  const handleImageRemoved = (questionId: string) => {
+    setQuestions((prev) =>
+      prev.map((q) => {
+        if (q.id === questionId) {
+          return {
+            ...q,
+            image_urls: [],
+          };
+        }
+        return q;
+      })
+    );
   };
 
   const hasActiveFilters =
@@ -562,20 +605,46 @@ export default function AdminQuestionBankPage() {
                       )}
                     </div>
 
-                    <span className="text-xs text-slate-400 font-semibold">
-                      {q.subject} • {q.marks || 2} درجات
-                    </span>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={() => {
+                          setSelectedRecropQuestion(q);
+                          setRecropModalOpen(true);
+                        }}
+                        className="px-2.5 py-1 text-xs font-bold bg-blue-50 hover:bg-blue-100 text-blue-700 rounded-lg border border-blue-200 flex items-center gap-1.5 transition shrink-0"
+                        title="إعادة قص أو تعديل صورة هذا السؤال"
+                      >
+                        <Crop className="w-3.5 h-3.5 text-blue-600" />
+                        <span>{q.image_urls && q.image_urls.length > 0 ? '🔄 إعادة قص / تعديل الصورة' : '➕ قص / إضافة صورة'}</span>
+                      </button>
+
+                      <span className="text-xs text-slate-400 font-semibold">
+                        {q.subject} • {q.marks || 2} درجات
+                      </span>
+                    </div>
                   </div>
 
                   <p className="font-bold text-slate-800 text-base leading-relaxed pr-1">{q.text}</p>
 
                   {q.image_urls && q.image_urls.length > 0 && (
-                    <div className="my-3">
-                      <img
-                        src={q.image_urls[0]}
-                        alt="صورة السؤال"
-                        className="max-w-full h-auto max-h-52 rounded-xl border border-slate-200 shadow-xs"
-                      />
+                    <div className="my-3 space-y-1.5">
+                      <div className="relative inline-block group">
+                        <img
+                          src={q.image_urls[0]}
+                          alt="صورة السؤال"
+                          className="max-w-full h-auto max-h-56 rounded-xl border border-slate-200 shadow-xs"
+                        />
+                        <button
+                          onClick={() => {
+                            setSelectedRecropQuestion(q);
+                            setRecropModalOpen(true);
+                          }}
+                          className="absolute top-2 left-2 px-2.5 py-1 bg-slate-900/85 hover:bg-slate-900 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-md transition backdrop-blur-xs opacity-90 group-hover:opacity-100"
+                        >
+                          <Crop className="w-3.5 h-3.5 text-amber-400" />
+                          <span>إعادة قص من الكتاب</span>
+                        </button>
+                      </div>
                     </div>
                   )}
 
@@ -608,6 +677,18 @@ export default function AdminQuestionBankPage() {
           </div>
         )}
       </div>
+
+      {/* Interactive Re-crop Modal */}
+      <RecropModal
+        isOpen={recropModalOpen}
+        question={selectedRecropQuestion}
+        onClose={() => {
+          setRecropModalOpen(false);
+          setSelectedRecropQuestion(null);
+        }}
+        onImageUpdated={handleImageUpdated}
+        onImageRemoved={handleImageRemoved}
+      />
     </div>
   );
 }
