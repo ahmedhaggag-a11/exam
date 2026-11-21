@@ -3,11 +3,13 @@ export interface ExamPaperConfig {
   pageSize: 'A4' | 'A3';
   direction: 'rtl';
   fontFamily: 'Tajawal' | 'Cairo' | 'Amiri' | 'Traditional Arabic';
-  fontSize: 'sm' | 'base' | 'lg';
+  fontSize: 'xs' | 'sm' | 'base' | 'lg' | 'xl';
   columns: 1 | 2;
   pageBorder: 'none' | 'single' | 'double' | 'rounded';
   headerStyle: 'standard' | 'formal' | 'boxed' | 'modern-gradient' | 'minimal';
   themeColor: string; // e.g., '#1e3a8a' or '#0f172a'
+  questionsPerPage?: number; // 0 = continuous auto flow; 2, 3, 4, 5, 6, 8 = fixed per page
+  autoScaleFont?: boolean; // auto adjust font and spacing based on questionsPerPage
 
   // Header Details
   header: {
@@ -77,6 +79,8 @@ export const DEFAULT_PAPER_CONFIG: ExamPaperConfig = {
   pageBorder: 'single',
   headerStyle: 'formal',
   themeColor: '#1e3a8a',
+  questionsPerPage: 0,
+  autoScaleFont: true,
 
   header: {
     ministryLine: 'جمهورية مصر العربية - وزارة التربية والتعليم',

@@ -19,7 +19,8 @@ import {
   Layers, 
   BookOpen, 
   GraduationCap, 
-  Calendar 
+  Calendar,
+  Eye
 } from 'lucide-react';
 
 interface Exam {
@@ -300,10 +301,11 @@ export default function ExamsPage() {
                 <Link 
                   href={`/teacher/exams/${exam.id}/print`} 
                   target="_blank"
-                  className="px-3 py-2 border border-slate-200 text-slate-700 hover:bg-slate-50 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
+                  className="px-3 py-2 bg-blue-50 hover:bg-blue-100 border border-blue-200 text-blue-800 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shadow-2xs"
+                  title="معاينة وتنسيق صفحات الامتحان والطباعة A4"
                 >
-                  <Printer className="w-3.5 h-3.5 text-slate-500" />
-                  <span>طباعة</span>
+                  <Eye className="w-3.5 h-3.5 text-blue-600" />
+                  <span>معاينة وتنسيق الطباعة</span>
                 </Link>
 
                 <Link 

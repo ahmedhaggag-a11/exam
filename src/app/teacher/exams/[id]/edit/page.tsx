@@ -279,8 +279,8 @@ export default function ExamEditPage() {
             </button>
           )}
           <Link href={`/teacher/exams/${id}/print`} target="_blank"
-            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm hover:bg-blue-700 transition">
-            🖨️ طباعة
+            className="px-4 py-2 bg-blue-600 text-white rounded-lg text-sm font-bold hover:bg-blue-700 transition flex items-center gap-1.5 shadow-xs">
+            <span>📄 معاينة وتنسيق صفحات الطباعة (A4)</span>
           </Link>
           <Link href="/teacher/exams"
             className="px-4 py-2 border border-gray-300 text-gray-600 rounded-lg text-sm hover:bg-gray-50 transition">
