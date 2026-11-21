@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useRouter } from 'next/navigation';
 import { createClient } from '@/lib/supabase/client';
 import { generateExamAction, varyModelNumericalQuestionsAction } from './actions';
@@ -29,6 +29,9 @@ import {
   ArrowUpDown,
   ListOrdered,
   Crop,
+  RotateCcw,
+  Bookmark,
+  HelpCircle,
 } from 'lucide-react';
 import RecropModal from '@/components/RecropModal';
 
@@ -156,6 +159,12 @@ export default function CreateExamPage() {
   const [replacementModalOpen, setReplacementModalOpen] = useState(false);
   const [targetQuestionIndex, setTargetQuestionIndex] = useState<number | null>(null);
   const [replacementSearch, setReplacementSearch] = useState('');
+  const [replacementScope, setReplacementScope] = useState<'all' | 'exam_topics'>('all');
+  const [replacementChapter, setReplacementChapter] = useState('all');
+  const [replacementLesson, setReplacementLesson] = useState('all');
+  const [replacementType, setReplacementType] = useState('all');
+  const [replacementDiff, setReplacementDiff] = useState('all');
+  const [replacementSource, setReplacementSource] = useState('all');
   const [editingQuestionModalOpen, setEditingQuestionModalOpen] = useState(false);
   const [editingQuestion, setEditingQuestion] = useState<Question | null>(null);
   const [editingIndex, setEditingIndex] = useState<number | null>(null);
@@ -472,8 +481,138 @@ export default function CreateExamPage() {
   function openReplacementModal(idx: number) {
     setTargetQuestionIndex(idx);
     setReplacementSearch('');
+    const currentModel = generatedModels[activeModel];
+    const currentQ = currentModel?.questions?.[idx];
+    if (currentQ) {
+      setReplacementChapter(currentQ.chapter || currentQ.topic || 'all');
+      setReplacementLesson((currentQ as any).lesson || 'all');
+      setReplacementType(currentQ.question_type || 'all');
+    } else {
+      setReplacementChapter('all');
+      setReplacementLesson('all');
+      setReplacementType('all');
+    }
+    setReplacementDiff('all');
+    setReplacementSource('all');
+    setReplacementScope('all');
     setReplacementModalOpen(true);
   }
+
+  function resetReplacementFilters() {
+    setReplacementSearch('');
+    setReplacementChapter('all');
+    setReplacementLesson('all');
+    setReplacementType('all');
+    setReplacementDiff('all');
+    setReplacementSource('all');
+    setReplacementScope('all');
+  }
+
+  const hasActiveReplacementFilters =
+    replacementSearch.trim() !== '' ||
+    replacementChapter !== 'all' ||
+    replacementLesson !== 'all' ||
+    replacementType !== 'all' ||
+    replacementDiff !== 'all' ||
+    replacementSource !== 'all' ||
+    replacementScope !== 'all';
+
+  const sourcesMap = useMemo(() => {
+    const map: Record<string, string> = {};
+    sources.forEach(s => { map[s.id] = s.name; });
+    return map;
+  }, [sources]);
+
+  const replacementAvailableChapters = useMemo(() => {
+    const baseList = replacementScope === 'exam_topics' && selectedTopics.length > 0
+      ? questions.filter(q => selectedTopics.includes(q.chapter || q.topic || ''))
+      : questions;
+    const chapters = baseList
+      .map(q => q.chapter || q.topic)
+      .filter((c): c is string => !!c && c.trim() !== '');
+    return Array.from(new Set(chapters)).sort((a, b) => a.localeCompare(b, 'ar'));
+  }, [questions, replacementScope, selectedTopics]);
+
+  const replacementAvailableLessons = useMemo(() => {
+    let subset = replacementScope === 'exam_topics' && selectedTopics.length > 0
+      ? questions.filter(q => selectedTopics.includes(q.chapter || q.topic || ''))
+      : questions;
+    if (replacementChapter !== 'all') {
+      subset = subset.filter(q => (q.chapter || q.topic) === replacementChapter);
+    }
+    const lessons = subset
+      .map((q: any) => q.lesson)
+      .filter((l): l is string => !!l && l.trim() !== '');
+    return Array.from(new Set(lessons)).sort((a, b) => a.localeCompare(b, 'ar'));
+  }, [questions, replacementScope, selectedTopics, replacementChapter]);
+
+  const currentModelQuestionIds = useMemo(() => {
+    const currentModel = generatedModels[activeModel];
+    if (!currentModel?.questions) return new Set<string>();
+    return new Set(currentModel.questions.map((q: any) => q.id));
+  }, [generatedModels, activeModel]);
+
+  const filteredReplacementQuestions = useMemo(() => {
+    const baseList = replacementScope === 'exam_topics' && selectedTopics.length > 0
+      ? questions.filter(q => selectedTopics.includes(q.chapter || q.topic || ''))
+      : questions;
+
+    const list = baseList.filter(q => {
+      // 1. Text Search
+      if (replacementSearch.trim()) {
+        const term = replacementSearch.toLowerCase();
+        const textMatch = (q.text || q.question_text || '').toLowerCase().includes(term);
+        const chapterMatch = (q.chapter || q.topic || '').toLowerCase().includes(term);
+        const lessonMatch = ((q as any).lesson || '').toLowerCase().includes(term);
+        if (!textMatch && !chapterMatch && !lessonMatch) return false;
+      }
+
+      // 2. Chapter Filter
+      if (replacementChapter !== 'all') {
+        if ((q.chapter || q.topic) !== replacementChapter) return false;
+      }
+
+      // 3. Lesson Filter
+      if (replacementLesson !== 'all') {
+        if ((q as any).lesson !== replacementLesson) return false;
+      }
+
+      // 4. Type Filter
+      if (replacementType !== 'all') {
+        if (q.question_type !== replacementType) return false;
+      }
+
+      // 5. Difficulty Filter
+      if (replacementDiff !== 'all') {
+        if (q.difficulty !== replacementDiff) return false;
+      }
+
+      // 6. Source Filter
+      if (replacementSource !== 'all') {
+        if (q.source_id !== replacementSource) return false;
+      }
+
+      return true;
+    });
+
+    // Sort: Unused questions in current exam first
+    return [...list].sort((a, b) => {
+      const aUsed = currentModelQuestionIds.has(a.id) ? 1 : 0;
+      const bUsed = currentModelQuestionIds.has(b.id) ? 1 : 0;
+      return aUsed - bUsed;
+    });
+  }, [
+    questions,
+    replacementScope,
+    selectedTopics,
+    currentModelQuestionIds,
+    replacementSearch,
+    replacementChapter,
+    replacementLesson,
+    replacementType,
+    replacementDiff,
+    replacementSource
+  ]);
 
   function handleSelectReplacementQuestion(q: Question) {
     if (targetQuestionIndex === null) return;
@@ -1635,35 +1774,321 @@ export default function CreateExamPage() {
 
       {/* ── Modal 1: Replacement from Bank */}
       {replacementModalOpen && (
-        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-4">
-          <div className="bg-white rounded-3xl max-w-2xl w-full max-h-[85vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200">
-            <div className="p-5 border-b border-slate-100 flex items-center justify-between">
-              <div className="flex items-center gap-2 font-black text-slate-800 text-base">
-                <Search className="w-5 h-5 text-blue-600" /><span>اختر سؤالاً بديلاً من بنك الأسئلة</span>
-              </div>
-              <button onClick={() => setReplacementModalOpen(false)} className="p-1.5 text-slate-400 hover:text-slate-700 rounded-lg hover:bg-slate-100"><X className="w-5 h-5" /></button>
-            </div>
-            <div className="p-4 border-b border-slate-100 bg-slate-50">
-              <input type="text" value={replacementSearch} onChange={e => setReplacementSearch(e.target.value)} placeholder="ابحث في نص السؤال، الفصل، أو مستوى الصعوبة..." className="w-full px-3.5 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500" />
-            </div>
-            <div className="p-4 overflow-y-auto space-y-3 flex-1">
-              {pool.filter(q => {
-                if (!replacementSearch.trim()) return true;
-                const term = replacementSearch.toLowerCase();
-                return q.text?.toLowerCase().includes(term) || q.chapter?.toLowerCase().includes(term);
-              }).map(q => (
-                <div key={q.id} className="p-3.5 rounded-2xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50/30 transition flex items-start justify-between gap-3">
-                  <div className="space-y-1 flex-1">
-                    <div className="flex items-center gap-2">
-                      <span className="text-[10px] px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 font-bold">{q.question_type === 'mcq' ? 'MCQ' : q.question_type === 'essay' ? 'مقالي' : 'صح/خطأ'}</span>
-                      <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-100 text-slate-600 font-bold">{q.difficulty}</span>
-                      {q.chapter && <span className="text-[10px] text-slate-500 font-semibold">{q.chapter}</span>}
-                    </div>
-                    <p className="text-xs font-bold text-slate-800">{q.text}</p>
-                  </div>
-                  <button type="button" onClick={() => handleSelectReplacementQuestion(q)} className="px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shrink-0">استبدال بهذا السؤال</button>
+        <div className="fixed inset-0 z-50 bg-slate-900/60 backdrop-blur-sm flex items-center justify-center p-3 sm:p-4">
+          <div className="bg-white rounded-3xl max-w-4xl w-full max-h-[92vh] flex flex-col shadow-2xl overflow-hidden border border-slate-200 animate-in fade-in zoom-in-95 duration-200" dir="rtl">
+            {/* Modal Header */}
+            <div className="p-4 sm:p-5 border-b border-slate-100 flex items-center justify-between bg-gradient-to-r from-blue-50/80 via-indigo-50/40 to-white">
+              <div className="flex items-center gap-2.5">
+                <div className="p-2 bg-blue-600 text-white rounded-xl shadow-xs">
+                  <Search className="w-5 h-5" />
                 </div>
-              ))}
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="font-black text-slate-800 text-base">اختر سؤالاً بديلاً من بنك الأسئلة</h3>
+                    <span className="px-2 py-0.5 rounded-full bg-blue-100 text-blue-800 text-xs font-bold">
+                      {filteredReplacementQuestions.length} سؤال متاح
+                    </span>
+                  </div>
+                  <p className="text-xs text-slate-500 font-semibold mt-0.5">
+                    تصفح وابحث وفلتر الأسئلة البديلة بسهولة لاستبدال السؤال في النموذج الحالي
+                  </p>
+                </div>
+              </div>
+              <button 
+                type="button"
+                onClick={() => setReplacementModalOpen(false)} 
+                className="p-1.5 text-slate-400 hover:text-slate-700 rounded-xl hover:bg-slate-100 transition"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+
+            {/* Target Question Banner (The question being replaced) */}
+            {targetQuestionIndex !== null && generatedModels[activeModel]?.questions?.[targetQuestionIndex] && (() => {
+              const currentQ = generatedModels[activeModel].questions[targetQuestionIndex];
+              return (
+                <div className="px-4 py-3 bg-amber-50/80 border-b border-amber-200/70 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-2 text-xs">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className="font-bold text-amber-900 flex items-center gap-1">
+                      <span>السؤال الحالي المستهدف:</span>
+                      <strong className="px-1.5 py-0.5 bg-amber-200 text-amber-900 rounded font-black">#{targetQuestionIndex + 1}</strong>
+                    </span>
+                    {currentQ.chapter && (
+                      <span className="px-2 py-0.5 bg-white border border-amber-200 rounded-md text-amber-800 font-bold">
+                        📁 {currentQ.chapter}
+                      </span>
+                    )}
+                    {(currentQ as any).lesson && (
+                      <span className="px-2 py-0.5 bg-white border border-emerald-200 rounded-md text-emerald-800 font-bold">
+                        🔖 {(currentQ as any).lesson}
+                      </span>
+                    )}
+                    <span className="px-2 py-0.5 bg-white border border-slate-200 rounded-md text-slate-700 font-bold">
+                      {currentQ.question_type === 'mcq' ? 'اختيار من متعدد' : currentQ.question_type === 'essay' ? 'مقالي' : 'صح/خطأ'}
+                    </span>
+                    <span className="px-2 py-0.5 bg-white border border-slate-200 rounded-md text-slate-600 font-bold">
+                      {currentQ.difficulty === 'easy' ? 'سهل' : currentQ.difficulty === 'hard' ? 'صعب' : 'متوسط'}
+                    </span>
+                  </div>
+                  <p className="text-slate-600 font-semibold line-clamp-1 italic max-w-sm">
+                    &quot;{currentQ.text}&quot;
+                  </p>
+                </div>
+              );
+            })()}
+
+            {/* Filter Section (Search & Dropdowns Grid) */}
+            <div className="p-4 bg-slate-50 border-b border-slate-200 space-y-3">
+              {/* Search Bar & Reset button */}
+              <div className="flex items-center gap-2">
+                <div className="relative flex-1">
+                  <Search className="w-4 h-4 absolute right-3.5 top-3 text-slate-400" />
+                  <input
+                    type="text"
+                    value={replacementSearch}
+                    onChange={e => setReplacementSearch(e.target.value)}
+                    placeholder="ابحث في نص السؤال، اسم الفصل، أو الدرس..."
+                    className="w-full pr-10 pl-8 py-2 bg-white border border-slate-200 rounded-xl text-xs font-bold outline-none focus:ring-2 focus:ring-blue-500 shadow-2xs"
+                  />
+                  {replacementSearch && (
+                    <button
+                      type="button"
+                      onClick={() => setReplacementSearch('')}
+                      className="absolute left-2.5 top-2.5 text-slate-400 hover:text-slate-600"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  )}
+                </div>
+
+                {hasActiveReplacementFilters && (
+                  <button
+                    type="button"
+                    onClick={resetReplacementFilters}
+                    className="px-3 py-2 bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5 shrink-0 shadow-2xs"
+                    title="إعادة ضبط جميع الفلاتر"
+                  >
+                    <RotateCcw className="w-3.5 h-3.5" />
+                    <span className="hidden sm:inline">إعادة ضبط</span>
+                  </button>
+                )}
+              </div>
+
+              {/* 6 Filter Dropdowns */}
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-6 gap-2 pt-1 text-xs">
+                {/* 1. الفصل */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                    <BookOpen className="w-3 h-3 text-amber-600" />
+                    <span>الفصل</span>
+                  </label>
+                  <select
+                    value={replacementChapter}
+                    onChange={e => {
+                      setReplacementChapter(e.target.value);
+                      setReplacementLesson('all');
+                    }}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">الكل (جميع الفصول)</option>
+                    {replacementAvailableChapters.map(c => (
+                      <option key={c} value={c}>{c}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 2. الدرس */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                    <Bookmark className="w-3 h-3 text-emerald-600" />
+                    <span>الدرس</span>
+                  </label>
+                  <select
+                    value={replacementLesson}
+                    onChange={e => setReplacementLesson(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">الكل (جميع الدروس)</option>
+                    {replacementAvailableLessons.map(l => (
+                      <option key={l} value={l}>{l}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 3. نوع السؤال */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                    <HelpCircle className="w-3 h-3 text-blue-600" />
+                    <span>نوع السؤال</span>
+                  </label>
+                  <select
+                    value={replacementType}
+                    onChange={e => setReplacementType(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">الكل (جميع الأنواع)</option>
+                    <option value="mcq">اختيار من متعدد</option>
+                    <option value="true_false">صح أو خطأ</option>
+                    <option value="essay">مقالي</option>
+                  </select>
+                </div>
+
+                {/* 4. الصعوبة */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                    <Sliders className="w-3 h-3 text-amber-500" />
+                    <span>مستوى الصعوبة</span>
+                  </label>
+                  <select
+                    value={replacementDiff}
+                    onChange={e => setReplacementDiff(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">الكل (جميع المستويات)</option>
+                    <option value="easy">سهل</option>
+                    <option value="medium">متوسط</option>
+                    <option value="hard">صعب</option>
+                  </select>
+                </div>
+
+                {/* 5. المصدر */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                    <Layers className="w-3 h-3 text-indigo-600" />
+                    <span>المصدر</span>
+                  </label>
+                  <select
+                    value={replacementSource}
+                    onChange={e => setReplacementSource(e.target.value)}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">الكل (جميع المصادر)</option>
+                    {sources.map(s => (
+                      <option key={s.id} value={s.id}>{s.name}</option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* 6. نطاق البحث */}
+                <div>
+                  <label className="text-[11px] font-bold text-slate-600 mb-1 flex items-center gap-1">
+                    <Filter className="w-3 h-3 text-cyan-600" />
+                    <span>نطاق البحث</span>
+                  </label>
+                  <select
+                    value={replacementScope}
+                    onChange={e => setReplacementScope(e.target.value as any)}
+                    className="w-full px-2.5 py-1.5 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-700 outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="all">كل بنك الأسئلة</option>
+                    <option value="exam_topics">فصول الامتحان فقط</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+
+            {/* Questions List */}
+            <div className="p-4 overflow-y-auto space-y-3 flex-1">
+              {filteredReplacementQuestions.length === 0 ? (
+                <div className="p-8 text-center space-y-2 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
+                  <p className="text-sm font-bold text-slate-600">
+                    لا توجد أسئلة تطابق معايير البحث والفلترة الحالية
+                  </p>
+                  <button
+                    type="button"
+                    onClick={resetReplacementFilters}
+                    className="px-4 py-2 bg-blue-600 text-white rounded-xl text-xs font-bold hover:bg-blue-700 transition"
+                  >
+                    إعادة ضبط الفلاتر وعرض جميع الأسئلة
+                  </button>
+                </div>
+              ) : (
+                filteredReplacementQuestions.map(q => {
+                  const isUsedInCurrentExam = currentModelQuestionIds.has(q.id);
+                  return (
+                    <div
+                      key={q.id}
+                      className="p-4 rounded-2xl border border-slate-200 hover:border-blue-400 hover:bg-blue-50/20 transition flex flex-col sm:flex-row items-start justify-between gap-3 shadow-2xs"
+                    >
+                      <div className="space-y-2 flex-1">
+                        <div className="flex items-center gap-1.5 flex-wrap">
+                          <span className="text-[11px] px-2 py-0.5 rounded-md bg-blue-100 text-blue-800 font-bold">
+                            {q.question_type === 'mcq' ? 'اختيار من متعدد' : q.question_type === 'essay' ? 'مقالي' : 'صح/خطأ'}
+                          </span>
+                          <span className={`text-[11px] px-2 py-0.5 rounded-md font-bold border ${
+                            q.difficulty === 'hard'
+                              ? 'bg-red-50 text-red-700 border-red-200'
+                              : q.difficulty === 'easy'
+                              ? 'bg-emerald-50 text-emerald-700 border-emerald-200'
+                              : 'bg-amber-50 text-amber-700 border-amber-200'
+                          }`}>
+                            {q.difficulty === 'hard' ? 'صعب' : q.difficulty === 'easy' ? 'سهل' : 'متوسط'}
+                          </span>
+                          {q.chapter && (
+                            <span className="text-[11px] px-2 py-0.5 rounded-md bg-amber-50 text-amber-800 border border-amber-200 font-bold">
+                              📁 {q.chapter}
+                            </span>
+                          )}
+                          {(q as any).lesson && (
+                            <span className="text-[11px] px-2 py-0.5 rounded-md bg-emerald-50 text-emerald-800 border border-emerald-200 font-bold">
+                              🔖 {(q as any).lesson}
+                            </span>
+                          )}
+                          {q.source_id && sourcesMap[q.source_id] && (
+                            <span className="text-[11px] px-2 py-0.5 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 font-bold">
+                              📖 {sourcesMap[q.source_id]}
+                            </span>
+                          )}
+                          {q.image_urls && q.image_urls.length > 0 && (
+                            <span className="text-[11px] px-2 py-0.5 rounded-md bg-purple-50 text-purple-700 border border-purple-200 font-bold">
+                              🖼️ صورة
+                            </span>
+                          )}
+                          {isUsedInCurrentExam && (
+                            <span className="text-[10px] px-2 py-0.5 rounded-md bg-orange-100 text-orange-800 border border-orange-200 font-bold">
+                              ⚠️ موجود بالامتحان
+                            </span>
+                          )}
+                        </div>
+
+                        <p className="text-xs sm:text-sm font-bold text-slate-800 leading-relaxed">
+                          {q.text}
+                        </p>
+
+                        {/* Display choices if available */}
+                        {q.choices && q.choices.length > 0 && (
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5 pt-1">
+                            {q.choices
+                              .sort((a, b) => (a.order_index ?? 0) - (b.order_index ?? 0))
+                              .map((c, cIdx) => (
+                                <div
+                                  key={c.id || cIdx}
+                                  className={`text-[11px] p-2 rounded-lg border flex items-center justify-between ${
+                                    c.is_correct
+                                      ? 'bg-emerald-50 text-emerald-900 border-emerald-300 font-bold'
+                                      : 'bg-white text-slate-700 border-slate-200'
+                                  }`}
+                                >
+                                  <span>({c.choice_code || ['أ', 'ب', 'ج', 'د'][cIdx]}) {c.text}</span>
+                                  {c.is_correct && <span className="text-emerald-700 font-black">✓ صحيح</span>}
+                                </div>
+                              ))}
+                          </div>
+                        )}
+                      </div>
+
+                      <button
+                        type="button"
+                        onClick={() => handleSelectReplacementQuestion(q)}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-bold transition shrink-0 flex items-center gap-1.5 shadow-sm mt-2 sm:mt-0"
+                      >
+                        <Check className="w-3.5 h-3.5" />
+                        <span>استبدال بهذا السؤال</span>
+                      </button>
+                    </div>
+                  );
+                })
+              )}
             </div>
           </div>
         </div>
