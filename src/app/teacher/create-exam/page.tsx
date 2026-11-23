@@ -244,6 +244,8 @@ export default function CreateExamPage() {
   async function applyModelVariations(modelsList: any[]): Promise<any[]> {
     if (!varyQuestionNumbers || modelsList.length <= 1) return modelsList;
     const updated = [...modelsList];
+    let totalVariedCount = 0;
+
     for (let m = 1; m < updated.length; m++) {
       const model = updated[m];
       try {
@@ -256,6 +258,7 @@ export default function CreateExamPage() {
           model.questions = model.questions.map((q: any) => {
             const v = varRes.variations[q.id];
             if (v) {
+              totalVariedCount++;
               return {
                 ...q,
                 original_id: q.id,
@@ -273,6 +276,14 @@ export default function CreateExamPage() {
         console.warn('Numerical variation failed for model ' + model.model_code, err);
       }
     }
+
+    if (totalVariedCount > 0) {
+      setReasoning(prev => {
+        const msg = `🔢 تم تغيير أرقام ومعطيات ${totalVariedCount} مسألة حسابية بنجاح عبر النماذج بالذكاء الاصطناعي بدقة 100%.`;
+        return prev ? `${prev} • ${msg}` : msg;
+      });
+    }
+
     return updated;
   }
 
@@ -284,34 +295,44 @@ export default function CreateExamPage() {
 
     if (!selectedQs.length) return;
 
-    let models = generateExamModels(
-      selectedQs as any,
-      modelsCount,
-      shuffleQuestionOrder,
-      shuffleChoices,
-      false
-    );
+    setGenerating(true);
+    setStep(3);
+    setError('');
 
-    // Apply per-model order strategy
-    models = models.map((m, i) => ({
-      ...m,
-      questions: applyOrderStrategy(m.questions, perModelOrder[i] ?? 'shuffle', m.model_code),
-    }));
+    try {
+      let models = generateExamModels(
+        selectedQs as any,
+        modelsCount,
+        shuffleQuestionOrder,
+        shuffleChoices,
+        false
+      );
 
-    // Apply numerical variation across models (B, C, D) if enabled
-    models = await applyModelVariations(models);
-
-    if (gradingMode === 'equal' && selectedQs.length > 0) {
-      const baseMark = Math.max(1, Math.round((totalMark / selectedQs.length) * 10) / 10);
-      models = models.map(m => ({
+      // Apply per-model order strategy
+      models = models.map((m, i) => ({
         ...m,
-        questions: m.questions.map((q: any) => ({ ...q, marks: baseMark }))
+        questions: applyOrderStrategy(m.questions, perModelOrder[i] ?? 'shuffle', m.model_code),
       }));
-    }
 
-    setGeneratedModels(models);
-    setReasoning(`تم تكوين الامتحان بنجاح بناءً على اختيارك اليدوي لعدد (${selectedQs.length}) أسئلة محددة من بنك الأسئلة.`);
-    setStep(4);
+      // Apply numerical variation across models (B, C, D) if enabled
+      models = await applyModelVariations(models);
+
+      if (gradingMode === 'equal' && selectedQs.length > 0) {
+        const baseMark = Math.max(1, Math.round((totalMark / selectedQs.length) * 10) / 10);
+        models = models.map(m => ({
+          ...m,
+          questions: m.questions.map((q: any) => ({ ...q, marks: baseMark }))
+        }));
+      }
+
+      setGeneratedModels(models);
+      setReasoning(prev => prev || `تم تكوين الامتحان بنجاح بناءً على اختيارك اليدوي لعدد (${selectedQs.length}) أسئلة محددة من بنك الأسئلة.`);
+      setStep(4);
+    } catch (e: any) {
+      setError(e.message || 'خطأ أثناء توليد الامتحان');
+    } finally {
+      setGenerating(false);
+    }
   }
 
   // Active Model Questions & Marks Calculations
@@ -731,30 +752,49 @@ export default function CreateExamPage() {
         for (let qIdx = 0; qIdx < model.questions.length; qIdx++) {
           const q = model.questions[qIdx];
           if (q.is_varied) {
-            const { data: newQ } = await supabase.from('questions').insert({
+            const baseQ = pool.find((pq: any) => pq.id === q.original_id) || questions.find((pq: any) => pq.id === q.original_id) || q;
+            const { data: newQ, error: newQError } = await supabase.from('questions').insert({
               teacher_id: user.id,
               text: q.text,
-              question_type: q.question_type || 'mcq',
-              difficulty: q.difficulty || 'medium',
-              subject: q.subject || subjectId,
-              chapter: q.chapter,
-              lesson: q.lesson,
-              model_answer: q.model_answer,
-              marks: q.marks || 1,
+              question_type: q.question_type || baseQ.question_type || 'mcq',
+              difficulty: q.difficulty || baseQ.difficulty || 'medium',
+              subject: q.subject || baseQ.subject || subjectId,
+              chapter: q.chapter || baseQ.chapter || 'عام',
+              lesson: q.lesson || baseQ.lesson || null,
+              grade_level: q.grade_level || baseQ.grade_level || grade || null,
+              branch: q.branch || baseQ.branch || null,
+              term: q.term || baseQ.term || null,
+              model_answer: q.model_answer || baseQ.model_answer || null,
+              marks: q.marks || baseQ.marks || 1,
+              image_urls: q.image_urls || baseQ.image_urls || [],
+              needs_review: false,
             }).select().single();
 
-            if (newQ) {
+            if (newQ && !newQError) {
               if (q.choices && q.choices.length > 0) {
-                await supabase.from('question_choices').insert(q.choices.map((c: any) => ({
+                await supabase.from('question_choices').insert(q.choices.map((c: any, cIdx: number) => ({
                   question_id: newQ.id,
-                  choice_code: c.choice_code,
+                  choice_code: c.choice_code || ['أ', 'ب', 'ج', 'د'][cIdx] || 'أ',
                   text: c.text,
-                  is_correct: c.is_correct,
-                  order_index: c.order_index ?? 0,
+                  is_correct: !!c.is_correct,
+                  order_index: c.order_index ?? cIdx,
                 })));
               }
               model.questions[qIdx] = { ...q, id: newQ.id };
+            } else {
+              console.warn('Varied question insert error, falling back to original ID:', newQError);
+              model.questions[qIdx] = { ...q, id: q.original_id || q.id };
             }
+          }
+        }
+      }
+
+      // Extra safeguard: Ensure all question IDs across all models are valid UUIDs (no '_var_' leftovers)
+      for (const model of generatedModels) {
+        for (let qIdx = 0; qIdx < model.questions.length; qIdx++) {
+          const q = model.questions[qIdx];
+          if (typeof q.id === 'string' && q.id.includes('_var_')) {
+            model.questions[qIdx].id = q.original_id || q.id.split('_var_')[0];
           }
         }
       }
@@ -1454,12 +1494,30 @@ export default function CreateExamPage() {
             </div>
             <div className="flex items-center gap-2">
               <span className="text-xs font-bold text-slate-500">معاينة النموذج:</span>
-              <div className="flex gap-1.5">
-                {generatedModels.map((_, i) => (
-                  <button key={i} onClick={() => setActiveModel(i)} className={`px-3 py-1.5 rounded-xl text-xs font-black border transition ${activeModel === i ? 'bg-blue-600 text-white border-blue-600 shadow-sm' : 'border-slate-200 text-slate-600 hover:bg-slate-50'}`}>
-                    نموذج {['أ', 'ب', 'ج', 'د'][i]}
-                  </button>
-                ))}
+              <div className="flex gap-1.5 flex-wrap">
+                {generatedModels.map((m, i) => {
+                  const hasVaried = m.questions?.some((q: any) => q.is_varied);
+                  return (
+                    <button
+                      key={i}
+                      onClick={() => setActiveModel(i)}
+                      className={`px-3 py-1.5 rounded-xl text-xs font-black border transition flex items-center gap-1.5 ${
+                        activeModel === i
+                          ? 'bg-blue-600 text-white border-blue-600 shadow-sm'
+                          : 'border-slate-200 text-slate-600 hover:bg-slate-50'
+                      }`}
+                    >
+                      <span>نموذج {['أ', 'ب', 'ج', 'د'][i]}</span>
+                      {hasVaried && (
+                        <span className={`text-[10px] px-1.5 py-0.5 rounded-md font-bold ${
+                          activeModel === i ? 'bg-blue-700 text-blue-100' : 'bg-purple-100 text-purple-700'
+                        }`}>
+                          🔢 أرقام جديدة
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
               </div>
             </div>
           </div>

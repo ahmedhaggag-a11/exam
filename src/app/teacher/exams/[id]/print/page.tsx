@@ -127,12 +127,12 @@ export default function ExamPrintPage() {
       .order('model_code');
     setModels(modelsData || []);
 
-    // 1. Collect all question IDs from all models
+    // 1. Collect all question IDs from all models (including varied question IDs)
     const allQids = Array.from(
       new Set(
         (modelsData || [])
           .flatMap((m: any) => m.questions_order || [])
-          .map((qid: string) => (qid.includes('_var_') ? qid.split('_var_')[0] : qid))
+          .flatMap((qid: string) => (qid.includes('_var_') ? [qid, qid.split('_var_')[0]] : [qid]))
       )
     );
 

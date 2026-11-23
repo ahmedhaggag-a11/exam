@@ -190,16 +190,31 @@ export async function varyModelNumericalQuestionsAction(
     // 1. Identify which questions have numbers/calculations
     const numericalCandidates = questions.filter(q => {
       const text = q.text || q.question_text || '';
-      return /\d+(\.\d+)?\s*(أوم|فولت|أمبير|جول|نيوتن|متر|سم|ثانية|كيلو|وات|هرتز|كولوم|تسلا|ويبر|V|A|W|Ω|Hz|m|cm|kg|s|K|N|J|C|T|Wb|%)/i.test(text)
-        || (/\d+/.test(text) && /(احسب|أوجد|فإن|قيمة|شدة|مقاومة|طول|زاوية|نسبة|طاقة|كتلة|تساوي|يساوي|مقدار)/.test(text));
+      const choicesText = (q.choices || []).map((c: any) => c.text || '').join(' ');
+      const combined = `${text} ${choicesText}`;
+
+      // 1. Must contain any digit (0-9 or ٠-٩) or common fractions
+      const hasDigitsOrFractions = /[0-9٠-٩½¼¾⅓⅔]|(\b[0-9٠-٩]+\s*[\/÷]\s*[0-9٠-٩]+\b)/.test(combined);
+      if (!hasDigitsOrFractions) return false;
+
+      // 2. Physical/mathematical units or prefixes
+      const hasUnits = /[0-9٠-٩]+(\.[0-9٠-٩]+)?\s*(أوم|فولت|أمبير|جول|نيوتن|متر|سم|مم|ثانية|كيلو|وات|هرتز|كولوم|تسلا|ويبر|هنري|فاراد|V|A|W|Ω|Hz|m|cm|mm|km|kg|g|s|K|N|J|C|T|Wb|H|F|%|درجة|°|مللي|ميكرو|نانو|كيلوجرام|دقيقة|ساعة|كم|قسم)/i.test(combined);
+
+      // 3. Calculation/physics keywords
+      const hasCalcKeywords = /(احسب|أوجد|فإن|قيمة|شدة|مقاومة|طول|زاوية|نسبة|طاقة|كتلة|تساوي|يساوي|مقدار|سعة|تردد|جهد|تيار|قوة|كثافة|مستحثة|فوتون|إلكترون|سرعة|عجلة|مسافة|زمن|قدرة|حجم|مساحة|نصف قطر|دلالة|تدريج|قراءة|فرق|النسبة)/.test(combined);
+
+      // 4. Choices contain numbers/calculations
+      const choicesHaveNumbers = (q.choices || []).filter((c: any) => /[0-9٠-٩½¼¾⅓⅔]/.test(c.text || '')).length >= 2;
+
+      return hasUnits || hasCalcKeywords || choicesHaveNumbers;
     });
 
     if (numericalCandidates.length === 0) {
       return { success: true, variations: {} };
     }
 
-    // Process in clean batch (up to 12 numerical questions per model)
-    const targetBatch = numericalCandidates.slice(0, 12);
+    // Process up to 20 numerical questions per model
+    const targetBatch = numericalCandidates.slice(0, 20);
 
     const questionsPromptPayload = targetBatch.map((q, idx) => ({
       index: idx + 1,
@@ -219,9 +234,10 @@ export async function varyModelNumericalQuestionsAction(
 قواعد صارمة ودقيقة 100%:
 1. غير الأرقام المعطاة في نص السؤال إلى أرقام أخرى واقعية وفيزيائية متناسقة وسهلة الحساب (مثل مضاعفة الرقم، أو تغيير معطى مناسب كالجهد أو المقاومة أو الطول أو التردد).
 2. أعد حساب الإجابة الصحيحة رياضياً وفيزيائياً بدقة 100% بناءً على الأرقام الجديدة.
-3. عدل جميع خيارات السؤال (أ، ب، ج، د) بحيث يكون أحدها مطابقاً للناتج الجديد الصحيح تماماً، وباقي الخيارات مشتتات ذكية متناسقة مع الأرقام الجديدة.
+3. عدل جميع خيارات السؤال (أ، ب، ج، د) بحيث يكون أحدها مطابقاً للناتج الجديد الصحيح تماماً ومحدد كـ is_correct: true، وباقي الخيارات مشتتات ذكية متناسقة مع الأرقام الجديدة.
 4. إذا كان السؤال مقالياً، حدّث الإجابة النموذجية (model_answer) بالحسابات والناتج الجديد.
 5. حافظ على نفس النص اللغوي والصيغة والمفاهيم العلمية ومستوى الصعوبة بدون أي تغيير في جوهر السؤال.
+6. إذا كان السؤال يعتمد على صورة أو رسم تخطيطي ولم تذكر أرقام في نصه وكان التغيير مقتصراً على نواتج الخيارات، فعدل الخيارات والحسابات بدقة.
 
 الأسئلة المطلوب تغيير أرقامها:
 ${JSON.stringify(questionsPromptPayload, null, 2)}
@@ -244,27 +260,40 @@ ${JSON.stringify(questionsPromptPayload, null, 2)}
 }`;
 
     const ai = new GoogleGenAI({ apiKey });
-    const CANDIDATE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.1-flash-lite', 'gemini-flash-lite-latest'];
+    const CANDIDATE_MODELS = ['gemini-3.5-flash-lite', 'gemini-3.8-flash', 'gemini-3.5-flash'];
 
     let responseText: string | undefined;
     for (const modelName of CANDIDATE_MODELS) {
-      try {
-        const result = await ai.models.generateContent({
-          model: modelName,
-          contents: [{ role: 'user', parts: [{ text: prompt }] }],
-          config: { responseMimeType: 'application/json' },
-        });
-        if (result?.text) { responseText = result.text; break; }
-      } catch (e) {
-        // try next
+      for (let attempt = 0; attempt < 2; attempt++) {
+        try {
+          const result = await ai.models.generateContent({
+            model: modelName,
+            contents: [{ role: 'user', parts: [{ text: prompt }] }],
+            config: { responseMimeType: 'application/json' },
+          });
+          if (result?.text) {
+            responseText = result.text;
+            break;
+          }
+        } catch (e: any) {
+          // If rate limit or temporary server spike, short pause before retry
+          await new Promise(r => setTimeout(r, 600));
+        }
       }
+      if (responseText) break;
     }
 
     if (!responseText) {
+      console.warn('varyModelNumericalQuestionsAction: No response from Gemini models');
       return { success: false, variations: {} };
     }
 
-    const parsed = JSON.parse(responseText);
+    let cleanJson = responseText.trim();
+    if (cleanJson.startsWith('```')) {
+      cleanJson = cleanJson.replace(/^```(?:json)?\s*/i, '').replace(/```\s*$/, '').trim();
+    }
+
+    const parsed = JSON.parse(cleanJson);
     const variationsMap: Record<string, VariedQuestionItem> = {};
 
     (parsed.variations || []).forEach((v: any) => {
@@ -272,7 +301,7 @@ ${JSON.stringify(questionsPromptPayload, null, 2)}
         variationsMap[v.id] = {
           original_id: v.id,
           text: v.text,
-          choices: v.choices || [],
+          choices: Array.isArray(v.choices) ? v.choices : [],
           model_answer: v.model_answer || null,
         };
       }
