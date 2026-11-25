@@ -17,16 +17,19 @@ export async function updateQuestionImageAction(
   base64Data: string
 ): Promise<{ success: boolean; url?: string; error?: string }> {
   try {
-    // 1. Remove data URI prefix
+    // 1. Detect format and strip data URI prefix
+    const isPng = base64Data.startsWith('data:image/png');
+    const ext = isPng ? 'png' : 'jpg';
+    const contentType = isPng ? 'image/png' : 'image/jpeg';
     const base64Content = base64Data.replace(/^data:image\/\w+;base64,/, '');
     const buffer = Buffer.from(base64Content, 'base64');
-    const fileName = `images/${teacherId}/recrop_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.jpg`;
+    const fileName = `images/${teacherId}/recrop_${Date.now()}_${Math.random().toString(36).substring(2, 8)}.${ext}`;
 
     // 2. Upload to Supabase storage
     const { error: uploadError } = await supabaseAdmin.storage
       .from('pdfs')
       .upload(fileName, buffer, {
-        contentType: 'image/jpeg',
+        contentType,
         cacheControl: '3600',
         upsert: false,
       });

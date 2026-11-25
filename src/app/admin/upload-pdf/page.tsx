@@ -417,7 +417,7 @@ export default function AdminUploadPDFPage() {
   const cropImageFromPdf = async (pdfDoc: any, pageNumber: number, box: number[]): Promise<string | null> => {
     try {
       const page = await pdfDoc.getPage(pageNumber);
-      const scale = 2.0;
+      const scale = 2.4;
       const viewport = page.getViewport({ scale });
       
       const canvas = document.createElement('canvas');
@@ -555,17 +555,30 @@ export default function AdminUploadPDFPage() {
       for (let p = chunk.startPage; p <= chunk.endPage; p++) {
         const page = await doc.getPage(p);
         const originalViewport = page.getViewport({ scale: 1.0 });
-        // Scale optimized so image width is around 1200-1400px (fast, lightweight, highly readable for Gemini)
-        const scale = Math.min(1.3, 1400 / (originalViewport.width || 1000));
-        const viewport = page.getViewport({ scale: Math.max(scale, 1.0) });
-        const canvas = document.createElement('canvas');
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
-        const ctx = canvas.getContext('2d');
-        await page.render({ canvasContext: ctx, viewport }).promise;
-        const b64 = canvas.toDataURL('image/jpeg', 0.70).split(',')[1];
-        images.push(b64);
-        pageUploads.push({ pageNumber: p, base64: b64 });
+        // Render page at HD resolution (~1800-2200px) for crisp cloud page storage & manual recropping
+        const hdScale = Math.max(1.8, Math.min(2.4, 2000 / (originalViewport.width || 1000)));
+        const hdViewport = page.getViewport({ scale: hdScale });
+        const hdCanvas = document.createElement('canvas');
+        hdCanvas.width = hdViewport.width;
+        hdCanvas.height = hdViewport.height;
+        const hdCtx = hdCanvas.getContext('2d');
+        await page.render({ canvasContext: hdCtx, viewport: hdViewport }).promise;
+
+        const hdBase64 = hdCanvas.toDataURL('image/jpeg', 0.88).split(',')[1];
+        pageUploads.push({ pageNumber: p, base64: hdBase64 });
+
+        // Lightweight downscaled copy (~1200px) for fast Gemini extraction
+        const geminiScale = Math.min(1.0, 1250 / hdCanvas.width);
+        const aiCanvas = document.createElement('canvas');
+        aiCanvas.width = Math.round(hdCanvas.width * geminiScale);
+        aiCanvas.height = Math.round(hdCanvas.height * geminiScale);
+        const aiCtx = aiCanvas.getContext('2d');
+        if (aiCtx) {
+          aiCtx.drawImage(hdCanvas, 0, 0, aiCanvas.width, aiCanvas.height);
+          images.push(aiCanvas.toDataURL('image/jpeg', 0.72).split(',')[1]);
+        } else {
+          images.push(hdBase64);
+        }
       }
       chunkPayload = { imagesBase64: images };
 

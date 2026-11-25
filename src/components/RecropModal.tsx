@@ -79,15 +79,18 @@ export default function RecropModal({
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pdfFileInputRef = useRef<HTMLInputElement | null>(null);
 
-  // Helper: Draw a loaded HTMLImageElement onto the canvas
+  // Helper: Draw a loaded HTMLImageElement onto the canvas at FULL natural resolution,
+  // while scaling only CSS display dimensions so cropping never loses quality on mobile zoom-out.
   const drawPageImageToCanvas = useCallback((img: HTMLImageElement, targetScale: number) => {
     const canvas = pageCanvasRef.current;
     if (!canvas) return;
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    canvas.width = Math.round(img.naturalWidth * targetScale);
-    canvas.height = Math.round(img.naturalHeight * targetScale);
+    canvas.width = img.naturalWidth;
+    canvas.height = img.naturalHeight;
+    canvas.style.width = `${Math.round(img.naturalWidth * targetScale)}px`;
+    canvas.style.height = `${Math.round(img.naturalHeight * targetScale)}px`;
     ctx.clearRect(0, 0, canvas.width, canvas.height);
     ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
   }, []);
@@ -291,20 +294,26 @@ export default function RecropModal({
       try {
         setRenderingPage(true);
         const page = await activeDoc.getPage(pageNum);
-        const viewport = page.getViewport({ scale });
+        // Always render backing canvas at high resolution (>= 2.2x) for razor-sharp crops,
+        // while using `scale` only for CSS display sizing.
+        const renderScale = Math.max(2.2, scale);
+        const renderViewport = page.getViewport({ scale: renderScale });
+        const displayViewport = page.getViewport({ scale });
         const context = canvas.getContext('2d');
         if (!context) return;
 
-        canvas.width = viewport.width;
-        canvas.height = viewport.height;
+        canvas.width = renderViewport.width;
+        canvas.height = renderViewport.height;
+        canvas.style.width = `${Math.round(displayViewport.width)}px`;
+        canvas.style.height = `${Math.round(displayViewport.height)}px`;
 
-        await page.render({ canvasContext: context, viewport }).promise;
+        await page.render({ canvasContext: context, viewport: renderViewport }).promise;
         setCropBox(null);
         setCroppedPreviewUrl(null);
 
-        // Background-sync this page image to cloud storage so mobile/other devices open it instantly
+        // Background-sync this HD page image to cloud storage so mobile/other devices open it instantly
         if (question?.source_id) {
-          const jpgBase64 = canvas.toDataURL('image/jpeg', 0.78).split(',')[1];
+          const jpgBase64 = canvas.toDataURL('image/jpeg', 0.88).split(',')[1];
           uploadSourcePageImageAction(question.source_id, pageNum, jpgBase64).catch(() => {});
         }
       } catch (err) {
@@ -387,9 +396,12 @@ export default function RecropModal({
     const ctx = cropCanvas.getContext('2d');
     if (!ctx) return;
 
+    ctx.imageSmoothingEnabled = true;
+    ctx.imageSmoothingQuality = 'high';
     ctx.drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
 
-    const dataUrl = cropCanvas.toDataURL('image/jpeg', 0.92);
+    // Save as lossless PNG so circuit lines, labels, and numbers remain crystal-clear
+    const dataUrl = cropCanvas.toDataURL('image/png');
     setCroppedPreviewUrl(dataUrl);
   };
 
