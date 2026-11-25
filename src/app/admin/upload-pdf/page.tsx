@@ -19,6 +19,7 @@ import {
   Trash2,
   X,
   ListOrdered,
+  RefreshCw,
 } from 'lucide-react';
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
@@ -482,8 +483,8 @@ export default function AdminUploadPDFPage() {
     }
   };
 
-  // Process a specific chunk
-  const processChunk = async (chunkIdx: number) => {
+  // Process a specific chunk with automatic retry & non-stopping auto-play
+  const processChunk = async (chunkIdx: number, retryCount = 0) => {
     if (!file || !selectedTeacherId) return;
     const chunk = chunks[chunkIdx];
     if (!chunk) return;
@@ -491,7 +492,9 @@ export default function AdminUploadPDFPage() {
     setIsProcessing(true);
     setStatusMsg({
       type: 'success',
-      text: `جاري استخراج الأسئلة من الجزء رقم (${chunkIdx + 1}/${chunks.length}) [الصفحات من ${chunk.startPage} إلى ${chunk.endPage}]...`,
+      text: retryCount > 0
+        ? `جاري إعادة محاولة استخراج الجزء رقم (${chunkIdx + 1}/${chunks.length}) [محاولة ${retryCount + 1} من 3]...`
+        : `جاري استخراج الأسئلة من الجزء رقم (${chunkIdx + 1}/${chunks.length}) [الصفحات من ${chunk.startPage} إلى ${chunk.endPage}]...`,
     });
 
     // Update chunk status to processing
@@ -535,13 +538,16 @@ export default function AdminUploadPDFPage() {
       const images: string[] = [];
       for (let p = chunk.startPage; p <= chunk.endPage; p++) {
         const page = await doc.getPage(p);
-        const viewport = page.getViewport({ scale: 1.4 });
+        const originalViewport = page.getViewport({ scale: 1.0 });
+        // Scale optimized so image width is around 1200-1400px (fast, lightweight, highly readable for Gemini)
+        const scale = Math.min(1.3, 1400 / (originalViewport.width || 1000));
+        const viewport = page.getViewport({ scale: Math.max(scale, 1.0) });
         const canvas = document.createElement('canvas');
         canvas.width = viewport.width;
         canvas.height = viewport.height;
         const ctx = canvas.getContext('2d');
         await page.render({ canvasContext: ctx, viewport }).promise;
-        images.push(canvas.toDataURL('image/jpeg', 0.75).split(',')[1]);
+        images.push(canvas.toDataURL('image/jpeg', 0.70).split(',')[1]);
       }
       chunkPayload = { imagesBase64: images };
 
@@ -600,7 +606,7 @@ export default function AdminUploadPDFPage() {
       setChunks((prev) =>
         prev.map((c, i) =>
           i === chunkIdx
-            ? { ...c, status: 'completed', questionsCount: extractedQs.length }
+            ? { ...c, status: 'completed', questionsCount: extractedQs.length, error: undefined }
             : c
         )
       );
@@ -618,11 +624,11 @@ export default function AdminUploadPDFPage() {
           type: 'success',
           text: `${msg} جاري الانتقال للجزء التالي (${nextIdx + 1}/${chunks.length}) تلقائياً...`,
         });
-        // Wait 1.5 seconds and trigger next chunk automatically
         setTimeout(() => {
-          processChunk(nextIdx);
-        }, 1500);
+          processChunk(nextIdx, 0);
+        }, 1200);
       } else {
+        setIsProcessing(false);
         setStatusMsg({
           type: 'success',
           text: nextIdx >= chunks.length 
@@ -631,16 +637,46 @@ export default function AdminUploadPDFPage() {
         });
       }
     } catch (err: any) {
-      console.error(err);
+      console.error(`Error in chunk ${chunkIdx + 1}:`, err);
+
+      // 🔁 Auto-retry up to 2 times for transient network/server glitches
+      if (retryCount < 2) {
+        setStatusMsg({
+          type: 'error',
+          text: `تعذر مؤقتاً معالجة الجزء (${chunkIdx + 1}) [${err.message || 'خطأ مؤقت'}]. جاري إعادة المحاولة تلقائياً (محاولة ${retryCount + 2} من 3)...`,
+        });
+        setTimeout(() => {
+          processChunk(chunkIdx, retryCount + 1);
+        }, 2500);
+        return;
+      }
+
+      // If all retries exhausted, mark this chunk as error
       setChunks((prev) =>
         prev.map((c, i) => (i === chunkIdx ? { ...c, status: 'error', error: err.message } : c))
       );
-      setStatusMsg({
-        type: 'error',
-        text: `حدث خطأ في الجزء (${chunkIdx + 1}): ${err.message}`,
-      });
-    } finally {
-      setIsProcessing(false);
+
+      const nextIdx = chunkIdx + 1;
+      setCurrentChunkIndex(nextIdx);
+
+      // 🚀 IMPORTANT: Never stall! If autoPlay is enabled, auto-advance to next chunk so remaining chunks continue!
+      if (autoPlay && nextIdx < chunks.length) {
+        setStatusMsg({
+          type: 'error',
+          text: `⚠️ تعذر إكمال الجزء (${chunkIdx + 1}) بعد 3 محاولات. جاري المتابعة التلقائية للجزء التالي (${nextIdx + 1}/${chunks.length}) حتى لا يتوقف استخراج باقي الكتاب...`,
+        });
+        setTimeout(() => {
+          processChunk(nextIdx, 0);
+        }, 2000);
+      } else {
+        setIsProcessing(false);
+        setStatusMsg({
+          type: 'error',
+          text: nextIdx >= chunks.length
+            ? `اكتمل استخراج أجزاء الكتاب مع تعذر الجزء (${chunkIdx + 1}). يمكنك إعادة محاولته بنقرة واحدة.`
+            : `حدث خطأ في الجزء (${chunkIdx + 1}): ${err.message}`,
+        });
+      }
     }
   };
 
@@ -1109,6 +1145,25 @@ export default function AdminUploadPDFPage() {
                 />
                 <span>متابعة تلقائية للأجزاء التالية (Auto)</span>
               </label>
+
+              {/* Failed chunks retry button if any */}
+              {chunks.some(c => c.status === 'error') && !isProcessing && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    const firstFailedIdx = chunks.findIndex(c => c.status === 'error');
+                    if (firstFailedIdx !== -1) {
+                      setCurrentChunkIndex(firstFailedIdx);
+                      processChunk(firstFailedIdx, 0);
+                    }
+                  }}
+                  className="px-3 py-2 bg-amber-50 hover:bg-amber-100 text-amber-800 border border-amber-300 font-bold text-xs rounded-xl shadow-xs transition flex items-center gap-1.5"
+                  title="إعادة محاولة الأجزاء التي تعثرت أثناء المعالجة"
+                >
+                  <RefreshCw className="w-3.5 h-3.5 text-amber-600" />
+                  <span>إعادة المتعثر ({chunks.filter(c => c.status === 'error').length})</span>
+                </button>
+              )}
 
               {currentChunkIndex < chunks.length ? (
                 <div className="flex items-center gap-2">
