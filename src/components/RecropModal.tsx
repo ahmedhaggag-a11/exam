@@ -106,9 +106,16 @@ export default function RecropModal({
       if (cached) {
         const data = new Uint8Array(cached);
         const doc = await pdfjsLib.getDocument({ data }).promise;
+        const targetPage = question?.source_page && question.source_page > 0
+          ? Math.min(question.source_page, doc.numPages)
+          : 1;
         setPdfDoc(doc);
         setTotalPages(doc.numPages);
+        setCurrentPage(targetPage);
         setLoadingPdf(false);
+        setTimeout(() => {
+          renderCurrentPage(targetPage);
+        }, 80);
         return;
       }
 
@@ -121,11 +128,18 @@ export default function RecropModal({
             const arrayBuffer = await response.arrayBuffer();
             const data = new Uint8Array(arrayBuffer);
             const doc = await pdfjsLib.getDocument({ data }).promise;
+            const targetPage = question?.source_page && question.source_page > 0
+              ? Math.min(question.source_page, doc.numPages)
+              : 1;
             setPdfDoc(doc);
             setTotalPages(doc.numPages);
+            setCurrentPage(targetPage);
             // Save to local cache for future questions
             cachePdfFile(sourceId, arrayBuffer);
             setLoadingPdf(false);
+            setTimeout(() => {
+              renderCurrentPage(targetPage);
+            }, 80);
             return;
           }
         }
@@ -153,28 +167,39 @@ export default function RecropModal({
       const data = new Uint8Array(arrayBuffer);
       const doc = await pdfjsLib.getDocument({ data }).promise;
 
+      const targetPage = question?.source_page && question.source_page > 0
+        ? Math.min(question.source_page, doc.numPages)
+        : 1;
+
       setPdfDoc(doc);
       setTotalPages(doc.numPages);
-      setCurrentPage(question?.source_page && question.source_page > 0 ? question.source_page : 1);
+      setCurrentPage(targetPage);
 
       // Cache locally in IndexedDB so all other questions load it instantly
       await cachePdfFile(question?.source_id || 'active_book', arrayBuffer);
+      setLoadingPdf(false);
+      setTimeout(() => {
+        renderCurrentPage(targetPage);
+      }, 80);
     } catch (err: any) {
       setPdfError('تعذر فتح ملف الـ PDF المختار: ' + err.message);
-    } finally {
       setLoadingPdf(false);
     }
   };
 
   // 2. Render PDF Page on canvas whenever pdfDoc, currentPage, or scale changes
-  const renderCurrentPage = useCallback(async () => {
-    if (!pdfDoc || !pageCanvasRef.current) return;
+  const renderCurrentPage = useCallback(async (pageNumToRender?: number) => {
+    if (!pdfDoc) return;
+    const canvas = pageCanvasRef.current;
+    if (!canvas) return;
+
+    const pageNum = pageNumToRender ?? currentPage;
+    if (pageNum < 1 || (totalPages > 0 && pageNum > totalPages)) return;
 
     try {
       setRenderingPage(true);
-      const page = await pdfDoc.getPage(currentPage);
+      const page = await pdfDoc.getPage(pageNum);
       const viewport = page.getViewport({ scale });
-      const canvas = pageCanvasRef.current;
       const context = canvas.getContext('2d');
       if (!context) return;
 
@@ -189,7 +214,7 @@ export default function RecropModal({
     } finally {
       setRenderingPage(false);
     }
-  }, [pdfDoc, currentPage, scale]);
+  }, [pdfDoc, currentPage, totalPages, scale]);
 
   useEffect(() => {
     if (pdfDoc) {
@@ -449,12 +474,51 @@ export default function RecropModal({
 
           {activeTab === 'pdf' ? (
             <div className="space-y-4">
+              {/* Question Preview & Direct Jump Banner */}
+              {question && (
+                <div className="p-3 bg-blue-50/80 border border-blue-200 rounded-2xl flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 shadow-xs">
+                  <div className="space-y-1 max-w-xl">
+                    <div className="flex items-center gap-2 flex-wrap">
+                      <span className="text-[11px] font-black text-blue-900 bg-blue-100 px-2 py-0.5 rounded-md">
+                        السؤال الحالي:
+                      </span>
+                      {question.source_page && (
+                        <span className="text-xs font-black text-emerald-800 bg-emerald-100 border border-emerald-300 px-2.5 py-0.5 rounded-md flex items-center gap-1">
+                          📖 صفحة السؤال في الكتاب: ص {question.source_page}
+                        </span>
+                      )}
+                    </div>
+                    <p className="text-xs text-slate-700 font-semibold line-clamp-1">
+                      {question.text}
+                    </p>
+                  </div>
+
+                  {question.source_page && currentPage !== question.source_page && pdfDoc && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const p = question.source_page!;
+                        setCurrentPage(p);
+                        renderCurrentPage(p);
+                      }}
+                      className="shrink-0 px-3.5 py-1.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-sm transition flex items-center gap-1.5"
+                    >
+                      <span>🎯 انتقال لصفحة السؤال (ص {question.source_page})</span>
+                    </button>
+                  )}
+                </div>
+              )}
+
               {/* PDF Toolbar */}
               <div className="flex items-center justify-between flex-wrap gap-3 bg-slate-50 p-3 rounded-2xl border border-slate-200">
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-600">الصفحة:</span>
                   <button
-                    onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                    onClick={() => {
+                      const nextP = Math.max(1, currentPage - 1);
+                      setCurrentPage(nextP);
+                      renderCurrentPage(nextP);
+                    }}
                     disabled={currentPage <= 1 || renderingPage}
                     className="p-1.5 bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-40"
                     title="الصفحة السابقة"
@@ -471,6 +535,7 @@ export default function RecropModal({
                       const val = parseInt(e.target.value);
                       if (val >= 1 && (!totalPages || val <= totalPages)) {
                         setCurrentPage(val);
+                        renderCurrentPage(val);
                       }
                     }}
                     className="w-14 text-center py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:ring-1 focus:ring-blue-500"
@@ -480,7 +545,11 @@ export default function RecropModal({
                   </span>
 
                   <button
-                    onClick={() => setCurrentPage((p) => (totalPages ? Math.min(totalPages, p + 1) : p + 1))}
+                    onClick={() => {
+                      const nextP = totalPages ? Math.min(totalPages, currentPage + 1) : currentPage + 1;
+                      setCurrentPage(nextP);
+                      renderCurrentPage(nextP);
+                    }}
                     disabled={(totalPages > 0 && currentPage >= totalPages) || renderingPage}
                     className="p-1.5 bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-100 disabled:opacity-40"
                     title="الصفحة التالية"
@@ -538,26 +607,27 @@ export default function RecropModal({
               </div>
 
               {/* PDF Viewport with Crop Overlay */}
-              {loadingPdf ? (
-                <div className="h-80 flex flex-col items-center justify-center gap-2 text-slate-400 bg-slate-50 rounded-2xl border border-dashed border-slate-200">
-                  <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
-                  <span className="text-xs font-bold">جاري تحميل ملف الـ PDF...</span>
-                </div>
-              ) : pdfError && !pdfDoc ? (
+              {pdfError && !pdfDoc ? (
                 <div 
                   onClick={() => pdfFileInputRef.current?.click()}
-                  className="p-10 text-center bg-blue-50/50 hover:bg-blue-50/80 rounded-3xl border-2 border-dashed border-blue-300 hover:border-blue-500 cursor-pointer transition space-y-3"
+                  className="p-8 sm:p-10 text-center bg-blue-50/50 hover:bg-blue-50/80 rounded-3xl border-2 border-dashed border-blue-300 hover:border-blue-500 cursor-pointer transition space-y-3"
                 >
                   <div className="w-14 h-14 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
                     <FileText className="w-7 h-7" />
                   </div>
-                  <div>
+                  <div className="space-y-1">
                     <h3 className="text-sm font-black text-slate-800">
                       اضغط هنا لفتح ملف الـ PDF للكتاب من جهازك
                     </h3>
-                    <p className="text-xs text-slate-500 mt-1 max-w-md mx-auto">
-                      اختر ملف الكتاب مرة واحدة فقط، وسيتم حفظه تلقائياً في متصفحك لقص أي سؤال آخر فوراً بدون تكرار الاختيار.
-                    </p>
+                    {question?.source_page ? (
+                      <p className="text-xs text-blue-700 font-bold bg-blue-100/80 px-3 py-1.5 rounded-xl inline-block mt-1">
+                        🎯 سيتم فتح صفحة السؤال (صفحة {question.source_page}) فور اختيار الكتاب مباشرة!
+                      </p>
+                    ) : (
+                      <p className="text-xs text-slate-500 max-w-md mx-auto">
+                        اختر ملف الكتاب مرة واحدة فقط، وسيتم حفظه تلقائياً في متصفحك لقص أي سؤال آخر فوراً بدون تكرار الاختيار.
+                      </p>
+                    )}
                   </div>
                   <button
                     type="button"
@@ -572,7 +642,18 @@ export default function RecropModal({
                   </button>
                 </div>
               ) : (
-                <div className="relative border border-slate-300 rounded-2xl overflow-auto max-h-[500px] bg-slate-100 flex justify-center p-4 select-none">
+                <div className="relative border border-slate-300 rounded-2xl overflow-auto max-h-[500px] bg-slate-100 flex justify-center p-4 select-none min-h-[300px]">
+                  {loadingPdf && (
+                    <div className="absolute inset-0 bg-white/80 z-20 flex flex-col items-center justify-center gap-2 text-slate-500">
+                      <Loader2 className="w-8 h-8 animate-spin text-blue-600" />
+                      <span className="text-xs font-bold">
+                        {question?.source_page 
+                          ? `جاري فتح صفحة السؤال (${question.source_page})...` 
+                          : 'جاري تحميل صفحة الكتاب...'}
+                      </span>
+                    </div>
+                  )}
+
                   <div className="relative inline-block shadow-lg">
                     {/* Rendered PDF Page */}
                     <canvas ref={pageCanvasRef} className="block bg-white rounded-lg" />

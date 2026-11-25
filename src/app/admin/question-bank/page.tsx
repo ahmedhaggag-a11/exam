@@ -625,6 +625,12 @@ export default function AdminQuestionBankPage() {
                         </span>
                       )}
 
+                      {q.source_page && (
+                        <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-teal-50 text-teal-800 border border-teal-200">
+                          📍 ص {q.source_page}
+                        </span>
+                      )}
+
                       <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200">
                         📁 {q.chapter}
                       </span>
@@ -685,7 +691,7 @@ export default function AdminQuestionBankPage() {
                           className="absolute top-2 left-2 px-2.5 py-1 bg-slate-900/85 hover:bg-slate-900 text-white rounded-lg text-xs font-bold flex items-center gap-1.5 shadow-md transition backdrop-blur-xs opacity-90 group-hover:opacity-100"
                         >
                           <Crop className="w-3.5 h-3.5 text-amber-400" />
-                          <span>إعادة قص من الكتاب</span>
+                          <span>إعادة قص من الكتاب {q.source_page ? `(ص ${q.source_page})` : ''}</span>
                         </button>
                       </div>
                     </div>

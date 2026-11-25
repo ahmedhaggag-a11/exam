@@ -546,6 +546,11 @@ export default function TeacherQuestionBankPage() {
                         📖 {sourcesMap[q.source_id]}
                       </span>
                     )}
+                    {q.source_page && (
+                      <span className="text-xs font-black px-2.5 py-1 rounded-lg bg-teal-50 text-teal-800 border border-teal-200">
+                        📍 ص {q.source_page}
+                      </span>
+                    )}
                     <span className="text-xs font-bold px-2.5 py-1 rounded-lg bg-amber-50 text-amber-800 border border-amber-200">
                       📁 {q.chapter}
                     </span>
@@ -624,7 +629,7 @@ export default function TeacherQuestionBankPage() {
                         className="px-3 py-1.5 bg-blue-50 hover:bg-blue-100 text-blue-700 border border-blue-200 rounded-xl text-xs font-bold transition flex items-center gap-1.5"
                       >
                         <Crop className="w-3.5 h-3.5 text-blue-600" />
-                        <span>إعادة قص من الكتاب</span>
+                        <span>إعادة قص من الكتاب {q.source_page ? `(ص ${q.source_page})` : ''}</span>
                       </button>
                       <button
                         type="button"

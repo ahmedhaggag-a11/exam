@@ -431,11 +431,13 @@ export default function AdminUploadPDFPage() {
       const cropW = ((xmax - xmin) / 1000) * canvas.width;
       const cropH = ((ymax - ymin) / 1000) * canvas.height;
 
-      const padding = 10;
-      const finalX = Math.max(0, cropX - padding);
-      const finalY = Math.max(0, cropY - padding);
-      const finalW = Math.min(canvas.width - finalX, cropW + (padding * 2));
-      const finalH = Math.min(canvas.height - finalY, cropH + (padding * 2));
+      // Intelligent generous margins (especially vertical padding for top/bottom circuit wires and labels)
+      const padY = Math.max(35, Math.round(cropH * 0.06));
+      const padX = Math.max(25, Math.round(cropW * 0.04));
+      const finalX = Math.max(0, cropX - padX);
+      const finalY = Math.max(0, cropY - padY);
+      const finalW = Math.min(canvas.width - finalX, cropW + (padX * 2));
+      const finalH = Math.min(canvas.height - finalY, cropH + (padY * 2));
 
       const cropCanvas = document.createElement('canvas');
       cropCanvas.width = finalW;
