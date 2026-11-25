@@ -176,6 +176,9 @@ export default function AdminUploadPDFPage() {
         .eq('role', 'teacher');
       if (data && data.length > 0) {
         setTeachers(data);
+        if (data.length === 1) {
+          setSelectedTeacherId(data[0].id);
+        }
       }
     }
     loadTeachers();
@@ -488,7 +491,16 @@ export default function AdminUploadPDFPage() {
 
   // Process a specific chunk with automatic retry & non-stopping auto-play
   const processChunk = async (chunkIdx: number, retryCount = 0) => {
-    if (!file || !selectedTeacherId) return;
+    if (!selectedTeacherId) {
+      setStatusMsg({ type: 'error', text: '⚠️ يرجى اختيار المعلم المستهدف أولاً من القائمة بالأعلى!' });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
+    if (!file) {
+      setStatusMsg({ type: 'error', text: '⚠️ يرجى اختيار ملف الـ PDF الخاص بالكتاب أولاً من قسم الرفع بالأعلى!' });
+      window.scrollTo({ top: 0, behavior: 'smooth' });
+      return;
+    }
     const chunk = chunks[chunkIdx];
     if (!chunk) return;
 
