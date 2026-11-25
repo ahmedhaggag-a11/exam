@@ -517,8 +517,8 @@ export default function AdminUploadPDFPage() {
           selectedSubject,
           selectedGrade
         );
-        if (!srcRes.success || !srcRes.sourceData) {
-          throw new Error(srcRes.error || 'تعذر إنشاء سجل للمصدر');
+        if (!srcRes || !srcRes.success || !srcRes.sourceData) {
+          throw new Error(srcRes?.error || 'تعذر إنشاء سجل للمصدر');
         }
         activeSourceId = srcRes.sourceData.id;
         setSourceRecordId(activeSourceId);
@@ -557,11 +557,14 @@ export default function AdminUploadPDFPage() {
       }
       chunkPayload = { imagesBase64: images };
 
-      // Save each rendered page image to cloud storage in background so RecropModal opens any question's page directly
+      // Save each rendered page image to cloud storage in small batches of 2 pages so payload stays tiny
       if (activeSourceId && pageUploads.length > 0) {
-        uploadBookPagesAction(activeSourceId, pageUploads).catch((err) =>
-          console.warn('[ExamForge] Background page image upload error:', err)
-        );
+        for (let b = 0; b < pageUploads.length; b += 2) {
+          const batch = pageUploads.slice(b, b + 2);
+          uploadBookPagesAction(activeSourceId, batch).catch((err) =>
+            console.warn('[ExamForge] Background page image upload error:', err)
+          );
+        }
       }
 
       // 3. Send lightweight chunk to Gemini Multimodal
@@ -612,7 +615,9 @@ export default function AdminUploadPDFPage() {
           selectedTerm,
           extractedQs
         );
-        if (!saveRes.success) throw new Error(saveRes.error);
+        if (!saveRes || !saveRes.success) {
+          throw new Error(saveRes?.error || 'تعذر حفظ الأسئلة المستخرجة على السيرفر');
+        }
       }
 
       // Update chunk state

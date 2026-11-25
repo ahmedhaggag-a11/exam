@@ -626,56 +626,64 @@ export async function saveQuestionsBulk(
 ) {
   try {
     let insertedCount = 0;
-    for (const q of questions) {
-      let cleanChapter = q.chapter || 'عام';
-      if (cleanChapter.includes('الجزء') || /ص\s*\d+/.test(cleanChapter)) {
-        cleanChapter = subject || 'الفصل الأول';
-      }
-      let cleanLesson = q.lesson || null;
-      if (cleanLesson && (cleanLesson.includes('الجزء') || /ص\s*\d+/.test(cleanLesson))) {
-        cleanLesson = null;
-      }
+    const BATCH_SIZE = 8;
 
-      const questionRow = {
-        teacher_id: teacherId,
-        source_id: sourceId,
-        source_page: q.source_page || q.page_number || null,
-        text: q.text,
-        question_type: q.question_type || 'mcq',
-        difficulty: q.difficulty || 'medium',
-        subject: subject,
-        chapter: cleanChapter,
-        lesson: cleanLesson,
-        grade_level: gradeLevel || 'الصف الثالث الثانوي',
-        term: term || 'الترم الأول',
-        marks: q.question_type === 'essay' ? 4 : 2,
-        model_answer: q.model_answer || null,
-        needs_review: q.needs_review || false,
-        image_urls: q.final_image_url ? [q.final_image_url] : [],
-      };
+    for (let i = 0; i < questions.length; i += BATCH_SIZE) {
+      const batch = questions.slice(i, i + BATCH_SIZE);
+      const results = await Promise.all(
+        batch.map(async (q) => {
+          let cleanChapter = q.chapter || 'عام';
+          if (cleanChapter.includes('الجزء') || /ص\s*\d+/.test(cleanChapter)) {
+            cleanChapter = subject || 'الفصل الأول';
+          }
+          let cleanLesson = q.lesson || null;
+          if (cleanLesson && (cleanLesson.includes('الجزء') || /ص\s*\d+/.test(cleanLesson))) {
+            cleanLesson = null;
+          }
 
-      const { data: createdQ, error: qError } = await supabaseAdmin
-        .from('questions')
-        .insert(questionRow)
-        .select()
-        .single();
+          const questionRow = {
+            teacher_id: teacherId,
+            source_id: sourceId,
+            source_page: q.source_page || q.page_number || null,
+            text: q.text,
+            question_type: q.question_type || 'mcq',
+            difficulty: q.difficulty || 'medium',
+            subject: subject,
+            chapter: cleanChapter,
+            lesson: cleanLesson,
+            grade_level: gradeLevel || 'الصف الثالث الثانوي',
+            term: term || 'الترم الأول',
+            marks: q.question_type === 'essay' ? 4 : 2,
+            model_answer: q.model_answer || null,
+            needs_review: q.needs_review || false,
+            image_urls: q.final_image_url ? [q.final_image_url] : [],
+          };
 
-      if (qError) {
-        console.error('Error inserting question:', qError);
-        continue;
-      }
+          const { data: createdQ, error: qError } = await supabaseAdmin
+            .from('questions')
+            .insert(questionRow)
+            .select('id')
+            .single();
 
-      if (createdQ && q.choices && q.choices.length > 0) {
-        const choiceRows = q.choices.map((c: any, idx: number) => ({
-          question_id: createdQ.id,
-          choice_code: c.code || String.fromCharCode(65 + idx),
-          text: c.text,
-          is_correct: c.is_correct || false,
-          order_index: idx,
-        }));
-        await supabaseAdmin.from('question_choices').insert(choiceRows);
-      }
-      insertedCount++;
+          if (qError || !createdQ) {
+            console.error('Error inserting question:', qError);
+            return false;
+          }
+
+          if (q.choices && q.choices.length > 0) {
+            const choiceRows = q.choices.map((c: any, idx: number) => ({
+              question_id: createdQ.id,
+              choice_code: c.code || String.fromCharCode(65 + idx),
+              text: c.text,
+              is_correct: c.is_correct || false,
+              order_index: idx,
+            }));
+            await supabaseAdmin.from('question_choices').insert(choiceRows);
+          }
+          return true;
+        })
+      );
+      insertedCount += results.filter(Boolean).length;
     }
 
     await supabaseAdmin.from('sources').update({ status: 'completed' }).eq('id', sourceId);
