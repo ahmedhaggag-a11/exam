@@ -120,6 +120,7 @@ ${lessonsMenu}
   const CANDIDATE_MODELS = [
     'gemini-3.8-flash',
     'gemini-3.5-flash',
+    'gemini-2.5-flash',
     'gemini-3.5-flash-lite',
   ];
 
@@ -127,7 +128,7 @@ ${lessonsMenu}
   let responseText: string | undefined = undefined;
 
   for (const modelName of CANDIDATE_MODELS) {
-    for (let attempt = 0; attempt < 3; attempt++) {
+    for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const result = await ai.models.generateContent({
           model: modelName,
@@ -156,8 +157,8 @@ ${lessonsMenu}
         if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('Quota')) {
           break;
         }
-        // Exponential backoff for transient 503 high demand spikes
-        await new Promise(r => setTimeout(r, (attempt + 1) * 2000));
+        // Short backoff on 503 before switching to next fallback model
+        await new Promise(r => setTimeout(r, 1500));
       }
     }
     if (responseText) break;
