@@ -51,7 +51,7 @@ async function extractQuestionsMultimodal(
   const prompt = `أنت خبير تربوي وموجّه أول متخصص في تحليل المناهج والكتب المدرسية واستخراج بنوك الأسئلة بدقة فائقة.
 
 المهمة: استخرج جميع الأسئلة والتمارين والتدريبات الموجودة في هذا الجزء مع تفكيك وتصنيف دقيق لكل سؤال.
-ملاحظة هامة: قد يحتوي الملف على صفحات شرح ونظري ومقدمات؛ تجاهل صفحات الشرح تماماً ولا تستخرج منها أي نص، وركّز فقط وحصراً على استخراج الأسئلة الفعلية والتدريبات واختبارات الفصول ونماذج الامتحانات إن وجدت. وإذا لم تجد أي أسئلة في هذا الجزء، أرجع قائمة أسئلة فارغة [] بكل بساطة دون أي خطأ.
+ملاحظة هامة: قد يحتوي الملف على صفحات غلاف أو مقدمات أو شرح نظري بحت بدون أسئلة؛ تجاهل صفحات الشرح البحت فقط، وركّز على استخراج جميع الأسئلة الفعلية والتدريبات واختبارات الفصول والنماذج الاسترشادية. ⚠️ تنبيه صارم: إذا كانت أي صفحة تحتوي على أسئلة مرقّمة أو اختيارات (أ، ب، ج، د) أو مسائل، يجب استخراجها بالكامل دون إهمال أي سؤال، ولا تُرجع قائمة فارغة [] إلا إذا كانت كل الصفحات المرسلة خالية تماماً من أي سؤال.
 
 السياق الدراسي والمنهجي المبدئي لهذا الجزء:
 - الفصل / الوحدة المبدئية: "${chapterContext}"
@@ -118,9 +118,9 @@ ${lessonsMenu}
 }`;
 
   const CANDIDATE_MODELS = [
-    'gemini-3.5-flash-lite',
     'gemini-3.8-flash',
     'gemini-3.5-flash',
+    'gemini-3.5-flash-lite',
   ];
 
   let lastError: any = null;
@@ -150,8 +150,13 @@ ${lessonsMenu}
         }
       } catch (err: any) {
         lastError = err;
-        console.warn(`Gemini extraction attempt ${attempt + 1} failed with model ${modelName}:`, err?.message || err);
-        // Exponential backoff for 503 high demand spikes
+        const msg = String(err?.message || err);
+        console.warn(`Gemini extraction attempt ${attempt + 1} failed with model ${modelName}:`, msg);
+        // Do not waste time retrying the same model if daily/rate quota is exhausted
+        if (msg.includes('429') || msg.includes('RESOURCE_EXHAUSTED') || msg.includes('Quota')) {
+          break;
+        }
+        // Exponential backoff for transient 503 high demand spikes
         await new Promise(r => setTimeout(r, (attempt + 1) * 2000));
       }
     }
