@@ -95,6 +95,17 @@ export default function AdminUploadPDFPage() {
 
   // Reusable PDF.js document ref (keeps parsed PDF open in memory across all chunks)
   const loadedPdfDocRef = useRef<any>(null);
+  const sourceRecordIdRef = useRef<string | null>(null);
+  const autoPlayRef = useRef<boolean>(autoPlay);
+  const chunksRef = useRef<ChunkInfo[]>(chunks);
+
+  useEffect(() => {
+    autoPlayRef.current = autoPlay;
+  }, [autoPlay]);
+
+  useEffect(() => {
+    chunksRef.current = chunks;
+  }, [chunks]);
 
   const [statusMsg, setStatusMsg] = useState<{ type: 'success' | 'error'; text: string } | null>(null);
 
@@ -120,8 +131,8 @@ export default function AdminUploadPDFPage() {
         const end = Math.min(pages, sec.endPage || pages);
         if (start > end) continue;
 
-        // If a lesson spans many pages (>8), split internally to stay under Gemini limits
-        const MAX_PAGES_PER_CALL = 8;
+        // If a lesson spans many pages (>4), split internally to stay well under Vercel & Gemini limits
+        const MAX_PAGES_PER_CALL = 4;
         for (let p = start; p <= end; p += MAX_PAGES_PER_CALL) {
           const chunkEnd = Math.min(p + MAX_PAGES_PER_CALL - 1, end);
           mappedChunks.push({
@@ -189,6 +200,8 @@ export default function AdminUploadPDFPage() {
     if (e.target.files && e.target.files[0]) {
       const f = e.target.files[0];
       setFile(f);
+      sourceRecordIdRef.current = null;
+      setSourceRecordId(null);
       if (!sourceName) {
         setSourceName(f.name.replace(/\.[^/.]+$/, ''));
       }
@@ -501,15 +514,16 @@ export default function AdminUploadPDFPage() {
       window.scrollTo({ top: 0, behavior: 'smooth' });
       return;
     }
-    const chunk = chunks[chunkIdx];
+    const activeChunks = chunksRef.current.length > 0 ? chunksRef.current : chunks;
+    const chunk = activeChunks[chunkIdx];
     if (!chunk) return;
 
     setIsProcessing(true);
     setStatusMsg({
       type: 'success',
       text: retryCount > 0
-        ? `جاري إعادة محاولة استخراج الجزء رقم (${chunkIdx + 1}/${chunks.length}) [محاولة ${retryCount + 1} من 3]...`
-        : `جاري استخراج الأسئلة من الجزء رقم (${chunkIdx + 1}/${chunks.length}) [الصفحات من ${chunk.startPage} إلى ${chunk.endPage}]...`,
+        ? `جاري إعادة محاولة استخراج الجزء رقم (${chunkIdx + 1}/${activeChunks.length}) [محاولة ${retryCount + 1} من 3]...`
+        : `جاري استخراج الأسئلة من الجزء رقم (${chunkIdx + 1}/${activeChunks.length}) [الصفحات من ${chunk.startPage} إلى ${chunk.endPage}]...`,
     });
 
     // Update chunk status to processing
@@ -518,8 +532,8 @@ export default function AdminUploadPDFPage() {
     );
 
     try {
-      // 1. Ensure source record exists
-      let activeSourceId = sourceRecordId;
+      // 1. Ensure source record exists (use ref to prevent stale closures across auto-play chunks)
+      let activeSourceId = sourceRecordIdRef.current || sourceRecordId;
       if (!activeSourceId) {
         const srcRes = await registerSourceRecord(
           selectedTeacherId,
@@ -533,6 +547,7 @@ export default function AdminUploadPDFPage() {
           throw new Error(srcRes?.error || 'تعذر إنشاء سجل للمصدر');
         }
         activeSourceId = srcRes.sourceData.id;
+        sourceRecordIdRef.current = activeSourceId;
         setSourceRecordId(activeSourceId);
 
         // Upload original PDF book to Supabase Storage in background & cache locally
@@ -662,10 +677,10 @@ export default function AdminUploadPDFPage() {
         ? `تم بنجاح استخراج وحفظ الجزء (${chunkIdx + 1}) بواقع ${extractedQs.length} سؤال!`
         : `اكتمل فحص الجزء (${chunkIdx + 1}) - صفحات شرح بدون أسئلة. تم التخطي بنجاح!`;
 
-      if (autoPlay && nextIdx < chunks.length) {
+      if (autoPlayRef.current && nextIdx < activeChunks.length) {
         setStatusMsg({
           type: 'success',
-          text: `${msg} جاري الانتقال للجزء التالي (${nextIdx + 1}/${chunks.length}) تلقائياً...`,
+          text: `${msg} جاري الانتقال للجزء التالي (${nextIdx + 1}/${activeChunks.length}) تلقائياً...`,
         });
         setTimeout(() => {
           processChunk(nextIdx, 0);
@@ -674,8 +689,8 @@ export default function AdminUploadPDFPage() {
         setIsProcessing(false);
         setStatusMsg({
           type: 'success',
-          text: nextIdx >= chunks.length 
-            ? `🎉 مبروك! اكتمل استخراج جميع أجزاء الكتاب بنجاح وحفظ ${totalExtractedQuestions + extractedQs.length} سؤال في بنك المعلم!`
+          text: nextIdx >= activeChunks.length 
+            ? `🎉 مبروك! اكتمل استخراج جميع أجزاء الكتاب بنجاح!`
             : msg,
         });
       }
@@ -703,10 +718,10 @@ export default function AdminUploadPDFPage() {
       setCurrentChunkIndex(nextIdx);
 
       // 🚀 IMPORTANT: Never stall! If autoPlay is enabled, auto-advance to next chunk so remaining chunks continue!
-      if (autoPlay && nextIdx < chunks.length) {
+      if (autoPlayRef.current && nextIdx < activeChunks.length) {
         setStatusMsg({
           type: 'error',
-          text: `⚠️ تعذر إكمال الجزء (${chunkIdx + 1}) بعد 3 محاولات. جاري المتابعة التلقائية للجزء التالي (${nextIdx + 1}/${chunks.length}) حتى لا يتوقف استخراج باقي الكتاب...`,
+          text: `⚠️ تعذر إكمال الجزء (${chunkIdx + 1}) بعد 3 محاولات. جاري المتابعة التلقائية للجزء التالي (${nextIdx + 1}/${activeChunks.length}) حتى لا يتوقف استخراج باقي الكتاب...`,
         });
         setTimeout(() => {
           processChunk(nextIdx, 0);
