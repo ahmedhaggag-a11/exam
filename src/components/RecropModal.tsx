@@ -21,7 +21,13 @@ import {
 // @ts-ignore
 import * as pdfjsLib from 'pdfjs-dist/build/pdf';
 import { Question } from '@/types/database';
-import { updateQuestionImageAction, getSourcePdfUrlAction, removeQuestionImageAction } from '@/app/admin/question-bank/actions';
+import {
+  updateQuestionImageAction,
+  getSourcePdfUrlAction,
+  removeQuestionImageAction,
+  getSourcePageImageUrlAction,
+  uploadSourcePageImageAction,
+} from '@/app/admin/question-bank/actions';
 import { cachePdfFile, getCachedPdf } from '@/lib/utils/pdf-cache';
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.js`;
@@ -43,13 +49,14 @@ export default function RecropModal({
 }: RecropModalProps) {
   const [activeTab, setActiveTab] = useState<'pdf' | 'upload'>('pdf');
   
-  // PDF state
+  // PDF & Direct Page Image state
   const [pdfDoc, setPdfDoc] = useState<any>(null);
+  const [hasPageImage, setHasPageImage] = useState(false);
   const [loadingPdf, setLoadingPdf] = useState(false);
   const [pdfError, setPdfError] = useState<string | null>(null);
   const [currentPage, setCurrentPage] = useState<number>(1);
   const [totalPages, setTotalPages] = useState<number>(0);
-  const [scale, setScale] = useState<number>(1.5);
+  const [scale, setScale] = useState<number>(1.0);
   const [renderingPage, setRenderingPage] = useState(false);
 
   // Crop drag state
@@ -67,14 +74,56 @@ export default function RecropModal({
 
   // Refs
   const pageCanvasRef = useRef<HTMLCanvasElement | null>(null);
+  const pageImageRef = useRef<HTMLImageElement | null>(null);
   const overlayRef = useRef<HTMLDivElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const pdfFileInputRef = useRef<HTMLInputElement | null>(null);
+
+  // Helper: Draw a loaded HTMLImageElement onto the canvas
+  const drawPageImageToCanvas = useCallback((img: HTMLImageElement, targetScale: number) => {
+    const canvas = pageCanvasRef.current;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    canvas.width = Math.round(img.naturalWidth * targetScale);
+    canvas.height = Math.round(img.naturalHeight * targetScale);
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+  }, []);
+
+  // Helper: Load a single page image URL into an HTMLImageElement and render it
+  const loadSinglePageImageUrl = useCallback(
+    (url: string, pageNum: number): Promise<boolean> => {
+      return new Promise((resolve) => {
+        const img = new Image();
+        img.crossOrigin = 'anonymous';
+        img.onload = () => {
+          pageImageRef.current = img;
+          setHasPageImage(true);
+          setCurrentPage(pageNum);
+          // Default responsive scale so full page fits nicely on mobile or desktop
+          const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
+          const initialScale = isMobile ? Math.min(1.0, (window.innerWidth - 64) / img.naturalWidth) : 1.0;
+          setScale(Number(Math.max(0.4, initialScale).toFixed(2)));
+          setTimeout(() => {
+            drawPageImageToCanvas(img, Math.max(0.4, initialScale));
+          }, 50);
+          resolve(true);
+        };
+        img.onerror = () => resolve(false);
+        img.src = url;
+      });
+    },
+    [drawPageImageToCanvas]
+  );
 
   // 1. Reset and load when question changes or modal opens
   useEffect(() => {
     if (!isOpen || !question) {
       setPdfDoc(null);
+      setHasPageImage(false);
+      pageImageRef.current = null;
       setPdfError(null);
       setCropBox(null);
       setCroppedPreviewUrl(null);
@@ -86,40 +135,39 @@ export default function RecropModal({
     // Set initial page from source_page or 1
     const initPage = question.source_page && question.source_page > 0 ? question.source_page : 1;
     setCurrentPage(initPage);
+    setHasPageImage(false);
+    pageImageRef.current = null;
     setCropBox(null);
     setCroppedPreviewUrl(null);
     setUploadedBase64(null);
     setActionMsg(null);
 
-    // Try to load PDF from cache or source
-    loadPdfAuto(question.source_id);
+    // Load exact question page from the uploaded book
+    loadPdfAuto(question.source_id, initPage);
   }, [isOpen, question]);
 
-  // Load PDF automatically: checks local IndexedDB cache first, then cloud storage
-  const loadPdfAuto = async (sourceId?: string | null) => {
+  // Load question's exact page automatically:
+  // 1) Pre-rendered single page image in cloud storage (instant, works on mobile & desktop, no full PDF download)
+  // 2) Full PDF in cloud storage (if available) -> renders target page & caches it as page image
+  // 3) Local IndexedDB cache (if on same device where book was uploaded) -> renders target page & caches to cloud
+  const loadPdfAuto = async (sourceId?: string | null, targetPageNum: number = 1) => {
     try {
       setLoadingPdf(true);
       setPdfError(null);
 
-      // 1. Try local IndexedDB cache first (instant, zero network latency)
-      const cached = await getCachedPdf(sourceId || undefined);
-      if (cached) {
-        const data = new Uint8Array(cached);
-        const doc = await pdfjsLib.getDocument({ data }).promise;
-        const targetPage = question?.source_page && question.source_page > 0
-          ? Math.min(question.source_page, doc.numPages)
-          : 1;
-        setPdfDoc(doc);
-        setTotalPages(doc.numPages);
-        setCurrentPage(targetPage);
-        setLoadingPdf(false);
-        setTimeout(() => {
-          renderCurrentPage(targetPage);
-        }, 80);
-        return;
+      // 1. Try pre-rendered single page image from cloud storage FIRST
+      if (sourceId && targetPageNum >= 1) {
+        const pageImgRes = await getSourcePageImageUrlAction(sourceId, targetPageNum);
+        if (pageImgRes.success && pageImgRes.url) {
+          const loaded = await loadSinglePageImageUrl(pageImgRes.url, targetPageNum);
+          if (loaded) {
+            setLoadingPdf(false);
+            return;
+          }
+        }
       }
 
-      // 2. Try Supabase cloud signed URL if source_id is present
+      // 2. Try Supabase cloud signed URL for full PDF if source_id is present
       if (sourceId) {
         const res = await getSourcePdfUrlAction(sourceId);
         if (res.success && res.url) {
@@ -128,28 +176,44 @@ export default function RecropModal({
             const arrayBuffer = await response.arrayBuffer();
             const data = new Uint8Array(arrayBuffer);
             const doc = await pdfjsLib.getDocument({ data }).promise;
-            const targetPage = question?.source_page && question.source_page > 0
-              ? Math.min(question.source_page, doc.numPages)
-              : 1;
+            const targetPage = targetPageNum > 0 ? Math.min(targetPageNum, doc.numPages) : 1;
             setPdfDoc(doc);
             setTotalPages(doc.numPages);
             setCurrentPage(targetPage);
+            setScale(1.4);
             // Save to local cache for future questions
             cachePdfFile(sourceId, arrayBuffer);
             setLoadingPdf(false);
             setTimeout(() => {
-              renderCurrentPage(targetPage);
+              renderCurrentPage(targetPage, doc);
             }, 80);
             return;
           }
         }
       }
 
-      // 3. Fallback: Prompt teacher to pick book PDF once
-      setPdfError('اختر ملف الـ PDF الخاص بالكتاب لقص السؤال مباشرة (يُحفظ في جهازك تلقائياً لقص باقي الأسئلة فوراً)');
+      // 3. Try local IndexedDB cache on this device (instant if uploaded from this browser)
+      const cached = await getCachedPdf(sourceId || undefined);
+      if (cached) {
+        const data = new Uint8Array(cached);
+        const doc = await pdfjsLib.getDocument({ data }).promise;
+        const targetPage = targetPageNum > 0 ? Math.min(targetPageNum, doc.numPages) : 1;
+        setPdfDoc(doc);
+        setTotalPages(doc.numPages);
+        setCurrentPage(targetPage);
+        setScale(1.4);
+        setLoadingPdf(false);
+        setTimeout(() => {
+          renderCurrentPage(targetPage, doc);
+        }, 80);
+        return;
+      }
+
+      // 4. Fallback: Cloud page image / PDF not available for this legacy book
+      setPdfError('صفحة هذا السؤال غير محفوظة على السيرفر لأن الكتاب رُفع بحجم كبير قبل التحديث.');
     } catch (err: any) {
-      console.warn('Could not auto-load source PDF:', err);
-      setPdfError('اختر ملف الـ PDF الخاص بالكتاب لقص السؤال مباشرة (يُحفظ في جهازك تلقائياً لقص باقي الأسئلة فوراً)');
+      console.warn('Could not auto-load source PDF/page:', err);
+      setPdfError('تعذر تحميل صفحة السؤال من الكتاب المرفوع.');
     } finally {
       setLoadingPdf(false);
     }
@@ -174,12 +238,13 @@ export default function RecropModal({
       setPdfDoc(doc);
       setTotalPages(doc.numPages);
       setCurrentPage(targetPage);
+      setScale(1.4);
 
       // Cache locally in IndexedDB so all other questions load it instantly
       await cachePdfFile(question?.source_id || 'active_book', arrayBuffer);
       setLoadingPdf(false);
       setTimeout(() => {
-        renderCurrentPage(targetPage);
+        renderCurrentPage(targetPage, doc);
       }, 80);
     } catch (err: any) {
       setPdfError('تعذر فتح ملف الـ PDF المختار: ' + err.message);
@@ -187,47 +252,87 @@ export default function RecropModal({
     }
   };
 
-  // 2. Render PDF Page on canvas whenever pdfDoc, currentPage, or scale changes
-  const renderCurrentPage = useCallback(async (pageNumToRender?: number) => {
-    if (!pdfDoc) return;
-    const canvas = pageCanvasRef.current;
-    if (!canvas) return;
+  // 2. Render PDF Page or Single Cloud Page Image on canvas whenever page or scale changes
+  const renderCurrentPage = useCallback(
+    async (pageNumToRender?: number, overrideDoc?: any) => {
+      const activeDoc = overrideDoc ?? pdfDoc;
+      const canvas = pageCanvasRef.current;
+      if (!canvas) return;
 
-    const pageNum = pageNumToRender ?? currentPage;
-    if (pageNum < 1 || (totalPages > 0 && pageNum > totalPages)) return;
+      const pageNum = pageNumToRender ?? currentPage;
 
-    try {
-      setRenderingPage(true);
-      const page = await pdfDoc.getPage(pageNum);
-      const viewport = page.getViewport({ scale });
-      const context = canvas.getContext('2d');
-      if (!context) return;
+      // Case A: Single-page image mode (loaded directly from cloud storage)
+      if (!activeDoc && hasPageImage) {
+        // If user navigated to a different page number, try fetching that page image from cloud
+        if (pageNumToRender !== undefined && pageNumToRender !== currentPage && question?.source_id) {
+          setRenderingPage(true);
+          const res = await getSourcePageImageUrlAction(question.source_id, pageNumToRender);
+          if (res.success && res.url) {
+            await loadSinglePageImageUrl(res.url, pageNumToRender);
+          } else {
+            setActionMsg({ type: 'error', text: `الصفحة (${pageNumToRender}) غير متوفرة على السيرفر.` });
+          }
+          setRenderingPage(false);
+          return;
+        }
 
-      canvas.width = viewport.width;
-      canvas.height = viewport.height;
+        if (pageImageRef.current) {
+          drawPageImageToCanvas(pageImageRef.current, scale);
+          setCropBox(null);
+          setCroppedPreviewUrl(null);
+        }
+        return;
+      }
 
-      await page.render({ canvasContext: context, viewport }).promise;
-      setCropBox(null);
-      setCroppedPreviewUrl(null);
-    } catch (err) {
-      console.error('Error rendering page:', err);
-    } finally {
-      setRenderingPage(false);
-    }
-  }, [pdfDoc, currentPage, totalPages, scale]);
+      // Case B: Full PDF document mode
+      if (!activeDoc) return;
+      if (pageNum < 1 || (activeDoc.numPages > 0 && pageNum > activeDoc.numPages)) return;
+
+      try {
+        setRenderingPage(true);
+        const page = await activeDoc.getPage(pageNum);
+        const viewport = page.getViewport({ scale });
+        const context = canvas.getContext('2d');
+        if (!context) return;
+
+        canvas.width = viewport.width;
+        canvas.height = viewport.height;
+
+        await page.render({ canvasContext: context, viewport }).promise;
+        setCropBox(null);
+        setCroppedPreviewUrl(null);
+
+        // Background-sync this page image to cloud storage so mobile/other devices open it instantly
+        if (question?.source_id) {
+          const jpgBase64 = canvas.toDataURL('image/jpeg', 0.78).split(',')[1];
+          uploadSourcePageImageAction(question.source_id, pageNum, jpgBase64).catch(() => {});
+        }
+      } catch (err) {
+        console.error('Error rendering page:', err);
+      } finally {
+        setRenderingPage(false);
+      }
+    },
+    [pdfDoc, hasPageImage, currentPage, scale, question?.source_id, drawPageImageToCanvas, loadSinglePageImageUrl]
+  );
 
   useEffect(() => {
     if (pdfDoc) {
       renderCurrentPage();
+    } else if (hasPageImage && pageImageRef.current) {
+      drawPageImageToCanvas(pageImageRef.current, scale);
+      setCropBox(null);
+      setCroppedPreviewUrl(null);
     }
-  }, [pdfDoc, currentPage, scale, renderCurrentPage]);
+  }, [pdfDoc, hasPageImage, currentPage, scale, renderCurrentPage, drawPageImageToCanvas]);
 
-  // 3. Interactive Crop Events
-  const handleMouseDown = (e: React.MouseEvent<HTMLDivElement>) => {
+  // 3. Interactive Crop Events (Pointer Events for Mouse + Touch support on mobile)
+  const handlePointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!overlayRef.current || !pageCanvasRef.current) return;
+    e.currentTarget.setPointerCapture(e.pointerId);
     const rect = overlayRef.current.getBoundingClientRect();
-    const x = e.clientX - rect.left;
-    const y = e.clientY - rect.top;
+    const x = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
+    const y = Math.max(0, Math.min(e.clientY - rect.top, rect.height));
 
     setIsDragging(true);
     setCropStart({ x, y });
@@ -235,7 +340,7 @@ export default function RecropModal({
     setCroppedPreviewUrl(null);
   };
 
-  const handleMouseMove = (e: React.MouseEvent<HTMLDivElement>) => {
+  const handlePointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDragging || !cropStart || !overlayRef.current) return;
     const rect = overlayRef.current.getBoundingClientRect();
     const currentX = Math.max(0, Math.min(e.clientX - rect.left, rect.width));
@@ -249,37 +354,40 @@ export default function RecropModal({
     setCropBox({ x, y, w, h });
   };
 
-  const handleMouseUp = () => {
+  const handlePointerUp = (e: React.PointerEvent<HTMLDivElement>) => {
     if (!isDragging) return;
     setIsDragging(false);
+    try {
+      e.currentTarget.releasePointerCapture(e.pointerId);
+    } catch {}
 
-    if (cropBox && cropBox.w > 15 && cropBox.h > 15 && pageCanvasRef.current) {
+    if (cropBox && cropBox.w > 12 && cropBox.h > 12 && pageCanvasRef.current) {
       generateCroppedPreview(cropBox);
     }
   };
 
-  // Generate cropped preview from canvas
+  // Generate cropped preview from canvas (accounting for any CSS scaling)
   const generateCroppedPreview = (box: { x: number; y: number; w: number; h: number }) => {
     const srcCanvas = pageCanvasRef.current;
+    const overlay = overlayRef.current;
     if (!srcCanvas) return;
 
+    const rect = overlay?.getBoundingClientRect();
+    const scaleX = rect && rect.width > 0 ? srcCanvas.width / rect.width : 1;
+    const scaleY = rect && rect.height > 0 ? srcCanvas.height / rect.height : 1;
+
+    const sx = Math.round(box.x * scaleX);
+    const sy = Math.round(box.y * scaleY);
+    const sw = Math.max(1, Math.round(box.w * scaleX));
+    const sh = Math.max(1, Math.round(box.h * scaleY));
+
     const cropCanvas = document.createElement('canvas');
-    cropCanvas.width = box.w;
-    cropCanvas.height = box.h;
+    cropCanvas.width = sw;
+    cropCanvas.height = sh;
     const ctx = cropCanvas.getContext('2d');
     if (!ctx) return;
 
-    ctx.drawImage(
-      srcCanvas,
-      box.x,
-      box.y,
-      box.w,
-      box.h,
-      0,
-      0,
-      box.w,
-      box.h
-    );
+    ctx.drawImage(srcCanvas, sx, sy, sw, sh, 0, 0, sw, sh);
 
     const dataUrl = cropCanvas.toDataURL('image/jpeg', 0.92);
     setCroppedPreviewUrl(dataUrl);
@@ -493,7 +601,7 @@ export default function RecropModal({
                     </p>
                   </div>
 
-                  {question.source_page && currentPage !== question.source_page && pdfDoc && (
+                  {question.source_page && currentPage !== question.source_page && (pdfDoc || hasPageImage) && (
                     <button
                       type="button"
                       onClick={() => {
@@ -540,9 +648,11 @@ export default function RecropModal({
                     }}
                     className="w-14 text-center py-1 bg-white border border-slate-200 rounded-lg text-xs font-bold text-slate-800 outline-none focus:ring-1 focus:ring-blue-500"
                   />
-                  <span className="text-xs text-slate-500 font-bold">
-                    من {totalPages || '...'}
-                  </span>
+                  {totalPages > 0 && (
+                    <span className="text-xs text-slate-500 font-bold">
+                      من {totalPages}
+                    </span>
+                  )}
 
                   <button
                     onClick={() => {
@@ -561,7 +671,7 @@ export default function RecropModal({
                 <div className="flex items-center gap-2">
                   <span className="text-xs font-bold text-slate-600">الزووم:</span>
                   <button
-                    onClick={() => setScale((s) => Math.max(0.8, Number((s - 0.2).toFixed(1))))}
+                    onClick={() => setScale((s) => Math.max(0.4, Number((s - 0.15).toFixed(2))))}
                     className="p-1.5 bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-100"
                     title="تصغير"
                   >
@@ -571,7 +681,7 @@ export default function RecropModal({
                     {Math.round(scale * 100)}%
                   </span>
                   <button
-                    onClick={() => setScale((s) => Math.min(3.0, Number((s + 0.2).toFixed(1))))}
+                    onClick={() => setScale((s) => Math.min(3.0, Number((s + 0.15).toFixed(2))))}
                     className="p-1.5 bg-white border border-slate-200 rounded-lg text-slate-600 hover:bg-slate-100"
                     title="تكبير"
                   >
@@ -579,67 +689,55 @@ export default function RecropModal({
                   </button>
                 </div>
 
-                {/* Choose PDF from device if needed */}
-                <div>
-                  <button
-                    onClick={() => pdfFileInputRef.current?.click()}
-                    className="px-3 py-1.5 text-xs font-bold bg-white hover:bg-slate-100 text-slate-700 border border-slate-200 rounded-xl flex items-center gap-1.5"
-                  >
-                    <Upload className="w-3.5 h-3.5 text-blue-600" />
-                    <span>تغيير / فتح PDF من جهازك</span>
-                  </button>
-                  <input
-                    ref={pdfFileInputRef}
-                    type="file"
-                    accept="application/pdf"
-                    onChange={handleLocalPdfSelected}
-                    className="hidden"
-                  />
-                </div>
+                <input
+                  ref={pdfFileInputRef}
+                  type="file"
+                  accept="application/pdf"
+                  onChange={handleLocalPdfSelected}
+                  className="hidden"
+                />
               </div>
 
               {/* Instructions */}
               <div className="text-xs text-blue-700 bg-blue-50/70 p-2.5 rounded-xl border border-blue-200 flex items-center gap-2">
                 <Sparkles className="w-4 h-4 shrink-0 text-blue-600" />
                 <span>
-                  <strong>طريقة القص:</strong> اضغط واسحب بالماوس فوق أي جزء في الصفحة لتحديده بالمستطيل، ثم اضغط &ldquo;حفظ واعتماد القص&rdquo;.
+                  <strong>طريقة القص:</strong> اضغط واسحب بالإصبع أو الماوس فوق الرسمة لتحديدها بالمستطيل، ثم اضغط &ldquo;حفظ واعتماد الصورة&rdquo;.
                 </span>
               </div>
 
               {/* PDF Viewport with Crop Overlay */}
-              {pdfError && !pdfDoc ? (
-                <div 
-                  onClick={() => pdfFileInputRef.current?.click()}
-                  className="p-8 sm:p-10 text-center bg-blue-50/50 hover:bg-blue-50/80 rounded-3xl border-2 border-dashed border-blue-300 hover:border-blue-500 cursor-pointer transition space-y-3"
-                >
-                  <div className="w-14 h-14 bg-blue-100 text-blue-600 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
-                    <FileText className="w-7 h-7" />
+              {pdfError && !pdfDoc && !hasPageImage ? (
+                <div className="p-6 sm:p-8 text-center bg-amber-50/60 rounded-3xl border-2 border-dashed border-amber-300 space-y-4">
+                  <div className="w-12 h-12 bg-amber-100 text-amber-600 rounded-2xl flex items-center justify-center mx-auto shadow-sm">
+                    <AlertTriangle className="w-6 h-6" />
                   </div>
-                  <div className="space-y-1">
+                  <div className="space-y-1.5 max-w-md mx-auto">
                     <h3 className="text-sm font-black text-slate-800">
-                      اضغط هنا لفتح ملف الـ PDF للكتاب من جهازك
+                      صفحة الكتاب ({question?.source_page ? `ص ${question.source_page}` : 'الحالية'}) غير محفوظة على السيرفر بعد
                     </h3>
-                    {question?.source_page ? (
-                      <p className="text-xs text-blue-700 font-bold bg-blue-100/80 px-3 py-1.5 rounded-xl inline-block mt-1">
-                        🎯 سيتم فتح صفحة السؤال (صفحة {question.source_page}) فور اختيار الكتاب مباشرة!
-                      </p>
-                    ) : (
-                      <p className="text-xs text-slate-500 max-w-md mx-auto">
-                        اختر ملف الكتاب مرة واحدة فقط، وسيتم حفظه تلقائياً في متصفحك لقص أي سؤال آخر فوراً بدون تكرار الاختيار.
-                      </p>
-                    )}
+                    <p className="text-xs text-slate-600 leading-relaxed">
+                      الكتب المرفوعة قبل التحديث الأخير (أو الأكبر من 50 ميجا) لم تُرفع صفحاتها للسيرفر تلقائياً. يمكنك رفع صورة بديلة مباشرة أو فتح ملف الكتاب مرة واحدة لمزامنة الصفحة.
+                    </p>
                   </div>
-                  <button
-                    type="button"
-                    onClick={(e) => {
-                      e.stopPropagation();
-                      pdfFileInputRef.current?.click();
-                    }}
-                    className="px-5 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-md shadow-blue-600/20 transition inline-flex items-center gap-2"
-                  >
-                    <Upload className="w-4 h-4" />
-                    <span>📁 اختيار ملف الـ PDF</span>
-                  </button>
+                  <div className="flex items-center justify-center gap-2.5 flex-wrap">
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab('upload')}
+                      className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-xs font-black shadow-sm transition inline-flex items-center gap-1.5"
+                    >
+                      <ImageIcon className="w-4 h-4" />
+                      <span>رفع صورة السؤال مباشرة</span>
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => pdfFileInputRef.current?.click()}
+                      className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl text-xs font-black shadow-sm transition inline-flex items-center gap-1.5"
+                    >
+                      <Upload className="w-4 h-4" />
+                      <span>فتح الكتاب لمزامنة الصفحة</span>
+                    </button>
+                  </div>
                 </div>
               ) : (
                 <div className="relative border border-slate-300 rounded-2xl overflow-auto max-h-[500px] bg-slate-100 flex justify-center p-4 select-none min-h-[300px]">
@@ -655,16 +753,17 @@ export default function RecropModal({
                   )}
 
                   <div className="relative inline-block shadow-lg">
-                    {/* Rendered PDF Page */}
+                    {/* Rendered PDF / Book Page */}
                     <canvas ref={pageCanvasRef} className="block bg-white rounded-lg" />
 
-                    {/* Interactive Selection Overlay */}
+                    {/* Interactive Selection Overlay (supports both mouse and mobile touch) */}
                     <div
                       ref={overlayRef}
-                      onMouseDown={handleMouseDown}
-                      onMouseMove={handleMouseMove}
-                      onMouseUp={handleMouseUp}
-                      className="absolute inset-0 cursor-crosshair z-10"
+                      onPointerDown={handlePointerDown}
+                      onPointerMove={handlePointerMove}
+                      onPointerUp={handlePointerUp}
+                      onPointerCancel={handlePointerUp}
+                      className="absolute inset-0 cursor-crosshair z-10 touch-none"
                     >
                       {cropBox && cropBox.w > 0 && cropBox.h > 0 && (
                         <div

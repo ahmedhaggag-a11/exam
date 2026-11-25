@@ -32,6 +32,7 @@ import {
   analyzeBookStructureAction,
   getSignedPdfUploadUrlAction,
   updateSourceStoragePathAction,
+  uploadBookPagesAction,
 } from './actions';
 import { cachePdfFile } from '@/lib/utils/pdf-cache';
 
@@ -538,6 +539,7 @@ export default function AdminUploadPDFPage() {
 
       let chunkPayload: { pdfBase64?: string; imagesBase64?: string[] } = {};
       const images: string[] = [];
+      const pageUploads: Array<{ pageNumber: number; base64: string }> = [];
       for (let p = chunk.startPage; p <= chunk.endPage; p++) {
         const page = await doc.getPage(p);
         const originalViewport = page.getViewport({ scale: 1.0 });
@@ -549,9 +551,18 @@ export default function AdminUploadPDFPage() {
         canvas.height = viewport.height;
         const ctx = canvas.getContext('2d');
         await page.render({ canvasContext: ctx, viewport }).promise;
-        images.push(canvas.toDataURL('image/jpeg', 0.70).split(',')[1]);
+        const b64 = canvas.toDataURL('image/jpeg', 0.70).split(',')[1];
+        images.push(b64);
+        pageUploads.push({ pageNumber: p, base64: b64 });
       }
       chunkPayload = { imagesBase64: images };
+
+      // Save each rendered page image to cloud storage in background so RecropModal opens any question's page directly
+      if (activeSourceId && pageUploads.length > 0) {
+        uploadBookPagesAction(activeSourceId, pageUploads).catch((err) =>
+          console.warn('[ExamForge] Background page image upload error:', err)
+        );
+      }
 
       // 3. Send lightweight chunk to Gemini Multimodal
       const chunkLabel = chunk.label || `ص ${chunk.startPage} - ${chunk.endPage}`;

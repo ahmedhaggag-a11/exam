@@ -318,4 +318,79 @@ export async function updateQuestionAnswerAction(payload: {
   }
 }
 
+/**
+ * Check if a pre-rendered single page image exists in cloud storage (`pages/{sourceId}/page_{pageNumber}.jpg`)
+ * and return its signed/public URL.
+ */
+export async function getSourcePageImageUrlAction(
+  sourceId: string,
+  pageNumber: number
+): Promise<{ success: boolean; url?: string }> {
+  try {
+    if (!sourceId || !pageNumber || pageNumber < 1) {
+      return { success: false };
+    }
+
+    const folder = `pages/${sourceId}`;
+    const fileName = `page_${pageNumber}.jpg`;
+    const fullPath = `${folder}/${fileName}`;
+
+    // Verify existence via list
+    const { data: files, error: listErr } = await supabaseAdmin.storage
+      .from('pdfs')
+      .list(folder, { search: fileName, limit: 5 });
+
+    if (listErr || !files || !files.some((f) => f.name === fileName)) {
+      return { success: false };
+    }
+
+    const { data: signed, error: signErr } = await supabaseAdmin.storage
+      .from('pdfs')
+      .createSignedUrl(fullPath, 3600);
+
+    if (!signErr && signed?.signedUrl) {
+      return { success: true, url: signed.signedUrl };
+    }
+
+    const { data: pubData } = supabaseAdmin.storage.from('pdfs').getPublicUrl(fullPath);
+    if (pubData?.publicUrl) {
+      return { success: true, url: pubData.publicUrl };
+    }
+
+    return { success: false };
+  } catch (err) {
+    return { success: false };
+  }
+}
+
+/**
+ * Cache a single rendered page JPEG to cloud storage (`pages/{sourceId}/page_{pageNumber}.jpg`)
+ * so future recrops on any device open this page instantaneously.
+ */
+export async function uploadSourcePageImageAction(
+  sourceId: string,
+  pageNumber: number,
+  base64Data: string
+): Promise<{ success: boolean }> {
+  try {
+    if (!sourceId || !pageNumber || !base64Data) return { success: false };
+
+    const cleanBase64 = base64Data.replace(/^data:image\/\w+;base64,/, '');
+    const buffer = Buffer.from(cleanBase64, 'base64');
+    const storagePath = `pages/${sourceId}/page_${pageNumber}.jpg`;
+
+    const { error } = await supabaseAdmin.storage
+      .from('pdfs')
+      .upload(storagePath, buffer, {
+        contentType: 'image/jpeg',
+        cacheControl: '31536000',
+        upsert: true,
+      });
+
+    return { success: !error };
+  } catch (err) {
+    return { success: false };
+  }
+}
+
 

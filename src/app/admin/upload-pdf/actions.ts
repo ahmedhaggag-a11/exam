@@ -717,8 +717,9 @@ export async function getSignedPdfUploadUrlAction(
   fileName: string
 ): Promise<{ success: boolean; signedUrl?: string; token?: string; path?: string; error?: string }> {
   try {
-    const cleanFileName = fileName.replace(/[^a-zA-Z0-9._\-\u0600-\u06FF]/g, '_');
-    const storagePath = `sources/${sourceId}_${cleanFileName}`;
+    // Use strictly ASCII-safe path (Supabase Storage rejects Arabic/non-ASCII keys with InvalidKey)
+    const ext = fileName.split('.').pop()?.replace(/[^a-zA-Z0-9]/g, '') || 'pdf';
+    const storagePath = `sources/${sourceId}/book.${ext}`;
 
     const { data, error } = await supabaseAdmin.storage
       .from('pdfs')
@@ -735,6 +736,54 @@ export async function getSignedPdfUploadUrlAction(
   } catch (err: any) {
     console.error('getSignedPdfUploadUrlAction error:', err);
     return { success: false, error: err.message || 'فشل تجهيز مساحة رفع الكتاب' };
+  }
+}
+
+/**
+ * Upload rendered book page JPEGs to Supabase Storage (`pages/{sourceId}/page_{pageNumber}.jpg`)
+ * so any question can immediately open its exact source page on any device (desktop or mobile)
+ * without needing to re-upload or download the entire PDF book.
+ */
+export async function uploadBookPagesAction(
+  sourceId: string,
+  pages: Array<{ pageNumber: number; base64: string }>
+): Promise<{ success: boolean; uploadedCount: number }> {
+  try {
+    if (!sourceId || !pages || pages.length === 0) {
+      return { success: false, uploadedCount: 0 };
+    }
+
+    let uploadedCount = 0;
+    await Promise.all(
+      pages.map(async ({ pageNumber, base64 }) => {
+        try {
+          const cleanBase64 = base64.replace(/^data:image\/\w+;base64,/, '');
+          const buffer = Buffer.from(cleanBase64, 'base64');
+          const storagePath = `pages/${sourceId}/page_${pageNumber}.jpg`;
+
+          const { error } = await supabaseAdmin.storage
+            .from('pdfs')
+            .upload(storagePath, buffer, {
+              contentType: 'image/jpeg',
+              cacheControl: '31536000',
+              upsert: true,
+            });
+
+          if (!error) {
+            uploadedCount++;
+          } else {
+            console.warn(`[uploadBookPagesAction] Failed page ${pageNumber}:`, error.message);
+          }
+        } catch (err) {
+          console.warn(`[uploadBookPagesAction] Error page ${pageNumber}:`, err);
+        }
+      })
+    );
+
+    return { success: uploadedCount > 0, uploadedCount };
+  } catch (err) {
+    console.error('uploadBookPagesAction error:', err);
+    return { success: false, uploadedCount: 0 };
   }
 }
 
